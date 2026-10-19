@@ -27,18 +27,7 @@ import java.util.concurrent.TimeUnit
  * La sesión de voz de Miku (GeminiLiveClient) es independiente y sigue usando
  * el mismo modelo Live con AUDIO.
  */
-class GeminiLiveAgentClient(private val apiKey: String) {
-
-    data class ToolCall(
-        val id: String,
-        val name: String,
-        val args: JSONObject,
-    )
-
-    data class Decision(
-        val text: String?,
-        val calls: List<ToolCall>,
-    )
+class GeminiLiveAgentClient(private val apiKey: String) : AgentBrain {
 
     private val http: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -53,13 +42,13 @@ class GeminiLiveAgentClient(private val apiKey: String) {
     private var closed = false
 
     private val connected = CompletableDeferred<Unit>()
-    private val decisions = Channel<Decision>(Channel.UNLIMITED)
+    private val decisions = Channel<AgentDecision>(Channel.UNLIMITED)
 
     private val turnLock = Any()
     private val textBuffer = StringBuilder()
     private var toolCallInTurn = false
 
-    suspend fun awaitConnect(timeoutMs: Long = 25_000) {
+    override suspend fun awaitConnect(timeoutMs: Long) {
         if (apiKey.isBlank() || apiKey == "your_api_key_here") {
             throw IOException("GEMINI_API_KEY no configurada")
         }
@@ -79,7 +68,7 @@ class GeminiLiveAgentClient(private val apiKey: String) {
         MikuLog.d(TAG, "Agente Live conectado ($MODEL)")
     }
 
-    suspend fun awaitDecision(timeoutMs: Long = 90_000): Decision {
+    override suspend fun awaitDecision(timeoutMs: Long): AgentDecision {
         return try {
             withTimeout(timeoutMs) { decisions.receive() }
         } catch (timeout: TimeoutCancellationException) {
@@ -87,7 +76,7 @@ class GeminiLiveAgentClient(private val apiKey: String) {
         }
     }
 
-    fun sendObservation(text: String, screenshotBase64: String?) {
+    override fun sendObservation(text: String, screenshotBase64: String?) {
         val socket = webSocket ?: throw IOException("La sesión del agente Live no está conectada.")
         val parts = JSONArray().put(JSONObject().put("text", text))
         if (!screenshotBase64.isNullOrBlank()) {
@@ -125,7 +114,7 @@ class GeminiLiveAgentClient(private val apiKey: String) {
         }
     }
 
-    fun sendToolResponses(results: List<Pair<ToolCall, ActionResult>>) {
+    override fun sendToolResponses(results: List<Pair<AgentToolCall, ActionResult>>) {
         if (results.isEmpty()) return
         val socket = webSocket ?: return
 
@@ -145,7 +134,7 @@ class GeminiLiveAgentClient(private val apiKey: String) {
         socket.send(message.toString())
     }
 
-    fun close() {
+    override fun close() {
         if (closed) return
         closed = true
         runCatching { webSocket?.close(NORMAL_CLOSURE_CODE, "agent finished") }
@@ -251,12 +240,12 @@ class GeminiLiveAgentClient(private val apiKey: String) {
         json.optJSONObject("toolCall")
             ?.optJSONArray("functionCalls")
             ?.let { callsJson ->
-                val calls = mutableListOf<ToolCall>()
+                val calls = mutableListOf<AgentToolCall>()
                 for (index in 0 until callsJson.length()) {
                     val call = callsJson.optJSONObject(index) ?: continue
                     val name = call.optString("name")
                     if (name.isBlank()) continue
-                    calls += ToolCall(
+                    calls += AgentToolCall(
                         id = call.optString("id"),
                         name = name,
                         args = call.optJSONObject("args") ?: JSONObject(),
@@ -265,7 +254,7 @@ class GeminiLiveAgentClient(private val apiKey: String) {
                 if (calls.isNotEmpty()) {
                     synchronized(turnLock) { toolCallInTurn = true }
                     MikuLog.d(TAG, "toolCall del agente: ${calls.map { it.name }}")
-                    decisions.trySend(Decision(text = null, calls = calls))
+                    decisions.trySend(AgentDecision(text = null, calls = calls))
                 }
                 return
             }
@@ -300,7 +289,7 @@ class GeminiLiveAgentClient(private val apiKey: String) {
                 }
                 if (text.isNotBlank()) {
                     MikuLog.d(TAG, "Turno de texto del agente: ${text.take(160)}")
-                    decisions.trySend(Decision(text = text, calls = emptyList()))
+                    decisions.trySend(AgentDecision(text = text, calls = emptyList()))
                 }
             }
         }

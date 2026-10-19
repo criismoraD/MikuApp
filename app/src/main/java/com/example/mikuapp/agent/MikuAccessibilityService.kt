@@ -6,14 +6,25 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.Display
+import android.view.Gravity
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.TextView
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
+import com.example.mikuapp.util.MikuLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -39,11 +50,16 @@ class MikuAccessibilityService : AccessibilityService() {
     @Volatile
     private var nodesByIndex: Map<Int, AccessibilityNodeInfo> = emptyMap()
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var agentOverlayView: TextView? = null
+
     val actionExecutor: ActionExecutor by lazy { ActionExecutor(this) }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        MikuLog.d(TAG, "Servicio de accesibilidad conectado")
         serviceInfo = serviceInfo?.apply {
             flags = flags or
                 AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
@@ -62,9 +78,69 @@ class MikuAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        MikuLog.d(TAG, "Servicio de accesibilidad desconectado")
+        removeAgentOverlayNow()
         if (instance === this) instance = null
         nodesByIndex = emptyMap()
         super.onDestroy()
+    }
+
+    /**
+     * Muestra o actualiza el aviso flotante del agente ARTEMIS encima de
+     * cualquier app (WhatsApp, Ajustes...). Usa TYPE_ACCESSIBILITY_OVERLAY,
+     * por lo que no necesita el permiso de "dibujar sobre otras apps".
+     */
+    fun updateAgentOverlay(text: String) {
+        mainHandler.post {
+            if (instance !== this) return@post
+            val view = agentOverlayView ?: createAgentOverlayView().also { created ->
+                val params = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT,
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                    y = 150
+                }
+                runCatching {
+                    (getSystemService(WINDOW_SERVICE) as? WindowManager)
+                        ?.addView(created, params)
+                }
+                agentOverlayView = created
+            }
+            view.text = text
+        }
+    }
+
+    /** Oculta el aviso flotante del agente. */
+    fun hideAgentOverlay() {
+        mainHandler.post { removeAgentOverlayNow() }
+    }
+
+    private fun removeAgentOverlayNow() {
+        val view = agentOverlayView ?: return
+        agentOverlayView = null
+        runCatching {
+            (getSystemService(WINDOW_SERVICE) as? WindowManager)?.removeView(view)
+        }
+    }
+
+    private fun createAgentOverlayView(): TextView = TextView(this).apply {
+        setTextColor(Color.WHITE)
+        textSize = 12.5f
+        maxLines = 3
+        ellipsize = TextUtils.TruncateAt.END
+        setPadding(42, 26, 42, 26)
+        background = GradientDrawable().apply {
+            cornerRadius = 46f
+            setColor(Color.argb(235, 10, 30, 34))
+            setStroke(2, Color.argb(190, 82, 226, 212))
+        }
+        setShadowLayer(4f, 0f, 2f, Color.argb(210, 0, 0, 0))
     }
 
     /**
@@ -247,6 +323,7 @@ class MikuAccessibilityService : AccessibilityService() {
         var instance: MikuAccessibilityService? = null
             private set
 
+        private const val TAG = "Accessibility"
         private const val MAX_NODES = 140
         private const val MAX_VISITED = 5_000
         private const val MAX_TEXT_LENGTH = 100
@@ -259,16 +336,15 @@ class MikuAccessibilityService : AccessibilityService() {
         fun isServiceEnabled(context: Context): Boolean {
             if (instance != null) return true
 
-            val expected = ComponentName(context, MikuAccessibilityService::class.java)
-            val enabled = Settings.Secure.getString(
-                context.contentResolver,
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-            ) ?: return false
+            val manager = context.getSystemService(AccessibilityManager::class.java) ?: return false
+            if (!manager.isEnabled) return false
 
-            return enabled
-                .split(':')
-                .mapNotNull { ComponentName.unflattenFromString(it) }
-                .any { it == expected }
+            val expected = ComponentName(context, MikuAccessibilityService::class.java)
+            return manager
+                .getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                .any { info ->
+                    ComponentName.unflattenFromString(info.id) == expected
+                }
         }
 
         fun openAccessibilitySettings(context: Context) {

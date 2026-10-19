@@ -707,8 +707,9 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         ) { success, message ->
             _statusMessage.value = message
             val announcement = if (success) {
-                "La tarea terminó bien. Cuéntale al usuario el resultado con tu estilo, " +
-                    "en una o dos frases: $message"
+                "La tarea terminó bien. Cuéntale al usuario el resultado con tu estilo. " +
+                    "Si el resultado incluye información que el usuario pidió leer o consultar, " +
+                    "léesela o resúmela sin omitir lo importante. Resultado: $message"
             } else {
                 "La tarea falló. Explícale al usuario qué pasó con tu estilo, " +
                     "en una o dos frases: $message"
@@ -973,12 +974,34 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
                                     "El usuario debe activar «Miku Control Total» en Ajustes > Accesibilidad.",
                                 )
 
+                            MikuAccessibilityService.instance == null -> JSONObject()
+                                .put("result", "error")
+                                .put(
+                                    "message",
+                                    "El servicio de accesibilidad está habilitado pero no conectado. " +
+                                        "Pide al usuario que lo desactive y active de nuevo en Ajustes > Accesibilidad.",
+                                )
+
+                            ArtemisAgentLoop.state.value.running -> JSONObject()
+                                .put("result", "error")
+                                .put("message", "Ya hay una tarea de control en curso.")
+
                             else -> {
                                 startAgentTask(goal)
-                                JSONObject()
-                                    .put("result", "ok")
-                                    .put("message", "Control iniciado. Miku ya está observando la pantalla.")
-                                    .put("goal", goal)
+                                if (ArtemisAgentLoop.state.value.running) {
+                                    JSONObject()
+                                        .put("result", "ok")
+                                        .put("message", "Control iniciado. Miku ya está observando la pantalla.")
+                                        .put("goal", goal)
+                                } else {
+                                    JSONObject()
+                                        .put("result", "error")
+                                        .put(
+                                            "message",
+                                            ArtemisAgentLoop.state.value.finalMessage
+                                                ?: "No se pudo iniciar el control del teléfono.",
+                                        )
+                                }
                             }
                         }
                     }

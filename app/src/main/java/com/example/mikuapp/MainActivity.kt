@@ -236,6 +236,10 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
                 connectionState = connectionState,
                 isInitializing = isInitializing,
                 isSpeaking = isSpeaking,
+                accessibilityEnabled = accessibilityEnabled,
+                onAccessibilityClick = {
+                    MikuAccessibilityService.openAccessibilitySettings(context)
+                },
                 onDebugClick = { debugPanelOpen = true },
             )
 
@@ -427,6 +431,8 @@ private fun MikuHeader(
     connectionState: GeminiLiveClient.ConnectionState,
     isInitializing: Boolean,
     isSpeaking: Boolean,
+    accessibilityEnabled: Boolean,
+    onAccessibilityClick: () -> Unit,
     onDebugClick: () -> Unit,
 ) {
     val statusText: String
@@ -458,61 +464,106 @@ private fun MikuHeader(
         }
     }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = "Hatsune Miku",
-                    color = MikuOnSurface,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.4.sp,
-                )
-                Text(
-                    text = "V ${BuildConfig.VERSION_NAME}",
-                    color = MikuCyan,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.6.sp,
-                    modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
-                )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "Hatsune Miku",
+                        color = MikuOnSurface,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.4.sp,
+                    )
+                    Text(
+                        text = "V ${BuildConfig.VERSION_NAME}",
+                        color = MikuCyan,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
+                    )
+                }
+                Spacer(Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(statusColor),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = statusText,
+                        color = statusColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
-            Spacer(Modifier.height(2.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(statusColor),
-                )
-                Spacer(Modifier.width(6.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MikuSurface.copy(alpha = 0.75f))
+                    .border(1.dp, MikuCyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                    .clickable { onDebugClick() },
+            ) {
                 Text(
-                    text = statusText,
-                    color = statusColor,
+                    text = "DiagnÃ³stico",
+                    color = MikuCyanLight,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                 )
             }
         }
-        Box(
+
+        Row(
             modifier = Modifier
+                .padding(start = 4.dp, top = 2.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MikuSurface.copy(alpha = 0.75f))
-                .border(1.dp, MikuCyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                .clickable { onDebugClick() },
+                .background(
+                    if (accessibilityEnabled) {
+                        MikuCyan.copy(alpha = 0.14f)
+                    } else {
+                        Color(0xFFFFC145).copy(alpha = 0.14f)
+                    },
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (accessibilityEnabled) {
+                        MikuCyan.copy(alpha = 0.45f)
+                    } else {
+                        Color(0xFFFFC145).copy(alpha = 0.45f)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                )
+                .clickable { onAccessibilityClick() }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(if (accessibilityEnabled) MikuCyan else Color(0xFFFFC145)),
+            )
+            Spacer(Modifier.width(6.dp))
             Text(
-                text = "DiagnÃ³stico",
-                color = MikuCyanLight,
-                fontSize = 12.sp,
+                text = if (accessibilityEnabled) {
+                    "Control total activo"
+                } else {
+                    "Activar control total"
+                },
+                color = if (accessibilityEnabled) MikuCyanLight else Color(0xFFFFC145),
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
             )
         }
     }
@@ -1345,6 +1396,7 @@ private fun ArtemisDebugSection(
     onOpenAccessibility: () -> Unit,
 ) {
     var goal by remember { mutableStateOf("") }
+    var validationMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
         modifier = Modifier
@@ -1356,7 +1408,7 @@ private fun ArtemisDebugSection(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "AGENTE ARTEMIS · CONTROL TOTAL",
+                text = "AGENTE ARTEMIS ï¿½ CONTROL TOTAL",
                 color = MikuCyan,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -1399,7 +1451,10 @@ private fun ArtemisDebugSection(
         ) {
             BasicTextField(
                 value = goal,
-                onValueChange = { goal = it },
+                onValueChange = {
+                    goal = it
+                    if (it.isNotBlank()) validationMessage = null
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1412,7 +1467,7 @@ private fun ArtemisDebugSection(
                 decorationBox = { innerTextField ->
                     if (goal.isEmpty()) {
                         Text(
-                            text = "Tarea para el teléfono: abre WhatsApp y escribe...",
+                            text = "Tarea para el telï¿½fono: abre WhatsApp y escribe...",
                             color = MikuMuted.copy(alpha = 0.6f),
                             fontSize = 12.sp,
                         )
@@ -1435,9 +1490,20 @@ private fun ArtemisDebugSection(
                     "Iniciar control"
                 },
                 onClick = {
-                    if (!agentState.running && goal.isNotBlank()) {
-                        onStartAgent(goal.trim())
-                        goal = ""
+                    when {
+                        agentState.running -> Unit
+                        !accessibilityEnabled -> {
+                            validationMessage =
+                                "Activa Â«Miku Control TotalÂ» en Ajustes > Accesibilidad"
+                        }
+                        goal.isBlank() -> {
+                            validationMessage = "Escribe primero quÃ© quieres que haga Miku"
+                        }
+                        else -> {
+                            validationMessage = null
+                            onStartAgent(goal.trim())
+                            goal = ""
+                        }
                     }
                 },
                 modifier = Modifier.weight(1f),
@@ -1449,10 +1515,20 @@ private fun ArtemisDebugSection(
             )
         }
 
+        validationMessage?.let { message ->
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = message,
+                color = Color(0xFFFFC145),
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+
         if (agentState.running && agentState.lastAction.isNotBlank()) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Paso ${agentState.step}/${agentState.maxSteps} · ${agentState.lastAction}",
+                text = "Paso ${agentState.step}/${agentState.maxSteps} ï¿½ ${agentState.lastAction}",
                 color = MikuMuted,
                 fontSize = 11.sp,
                 lineHeight = 15.sp,
@@ -1501,7 +1577,7 @@ private fun ArtemisControlOverlay(
                     Text(text = "?", color = Color(0xFFFF2A85), fontSize = 18.sp)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = "ARTEMIS · CONTROL TOTAL",
+                        text = "ARTEMIS ï¿½ CONTROL TOTAL",
                         color = MikuCyan,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
@@ -1517,7 +1593,7 @@ private fun ArtemisControlOverlay(
 
                 Text(
                     text = when {
-                        state.running -> "CONTROLANDO EL TELÉFONO"
+                        state.running -> "CONTROLANDO EL TELï¿½FONO"
                         state.success == true -> "TAREA COMPLETADA"
                         state.success == false -> "TAREA FALLIDA"
                         else -> "SIN TAREA ACTIVA"
@@ -1551,7 +1627,7 @@ private fun ArtemisControlOverlay(
                     )
                     if (state.lastAction.isNotBlank()) {
                         Text(
-                            text = "Última acción: ${state.lastAction}",
+                            text = "ï¿½ltima acciï¿½n: ${state.lastAction}",
                             color = MikuMuted,
                             fontSize = 12.sp,
                             lineHeight = 17.sp,
@@ -1580,7 +1656,7 @@ private fun ArtemisControlOverlay(
                 if (!accessibilityEnabled) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = "El servicio de accesibilidad no está activo.",
+                        text = "El servicio de accesibilidad no estï¿½ activo.",
                         color = Color(0xFFFFC145),
                         fontSize = 12.sp,
                     )

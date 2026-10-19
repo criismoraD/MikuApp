@@ -33,18 +33,20 @@ import java.util.ArrayDeque
 /**
  * Bucle reactivo Observe → Think → Act de MikuApp.
  *
- * "Think" se ejecuta en una sesión Gemini Live dedicada (Gemini 3.8 Live):
- * se envía la observación por clientContent (texto + captura) y se espera el
- * siguiente toolCall. No se usa ningún modelo de texto.
+ * "Think" se ejecuta con Gemini 3.5 Flash Lite vía generateContent con
+ * function calling forzado: se envía la observación (árbol UI + historial) y
+ * el modelo responde directamente la siguiente herramienta. La sesión Live de
+ * voz queda separada y no participa en la decisión de cada paso.
  */
 object ArtemisAgentLoop {
 
     const val MAX_STEPS = 15
 
-    private const val STABILIZE_MS = 1_500L
+    private const val STABILIZE_MS = 700L
     private const val MAX_CALLS_PER_TURN = 4
     private const val MAX_HISTORY = 8
-    private const val DECISION_TIMEOUT_MS = 90_000L
+    private const val DECISION_TIMEOUT_MS = 35_000L
+    private const val SCREENSHOT_IF_NODES_LESS_THAN = 5
     private const val NOTIFICATION_ID = 4546
     private const val CHANNEL_ID = "miku_artemis"
     private const val API_KEY_PLACEHOLDER = "your_api_key_here"
@@ -70,7 +72,7 @@ object ArtemisAgentLoop {
         val service = MikuAccessibilityService.instance
         if (service == null) {
             val message =
-                "Activa el Servicio de Accesibilidad de MikuApp en Ajustes para que pueda controlar el teléfono."
+                "El servicio de accesibilidad no está conectado. Desactívalo y actívalo de nuevo en Ajustes > Accesibilidad."
             _state.value = AgentState(
                 maxSteps = MAX_STEPS,
                 finalMessage = message,
@@ -92,14 +94,15 @@ object ArtemisAgentLoop {
             return false
         }
 
-        MikuLog.d(TAG, "Iniciando tarea ARTEMIS con Gemini 3.8 Live: $cleanGoal")
+        MikuLog.d(TAG, "Iniciando tarea ARTEMIS con Gemini 3.5 Flash Lite: $cleanGoal")
         _state.value = AgentState(
             running = true,
             goal = cleanGoal,
             maxSteps = MAX_STEPS,
-            lastAction = "Conectando con Gemini 3.8 Live...",
+            lastAction = "Conectando con Gemini 3.5 Flash Lite...",
         )
         postNotification(service, cleanGoal)
+        service.updateAgentOverlay("Miku · preparando control total…")
         job = scope.launch {
             runLoop(service, cleanGoal, effectiveKey, onFinished)
         }
@@ -119,6 +122,7 @@ object ArtemisAgentLoop {
                 success = current.success ?: false,
             )
         }
+        MikuAccessibilityService.instance?.hideAgentOverlay()
         cancelNotification()
     }
 
@@ -133,7 +137,7 @@ object ArtemisAgentLoop {
         apiKey: String,
         onFinished: ((Boolean, String) -> Unit)?,
     ) {
-        val client = GeminiLiveAgentClient(apiKey)
+        val client: AgentBrain = GeminiTextAgentClient(apiKey)
         val executor = service.actionExecutor
         val history = ArrayDeque<String>()
 
@@ -155,7 +159,7 @@ object ArtemisAgentLoop {
             var previousFingerprint: Int? = null
             var step = 0
             var textOnlyTurns = 0
-            var screenshot = service.captureScreenshotBase64()
+            var screenshot = screenshotIfConvenient(service, snapshot)
 
             var observation = buildObservation(
                 goal = goal,
@@ -186,7 +190,7 @@ object ArtemisAgentLoop {
                         return
                     }
 
-                    _state.update {
+                    updateState(service) {
                         it.copy(
                             step = step,
                             lastAction = "Esperando una herramienta",
@@ -223,13 +227,13 @@ object ArtemisAgentLoop {
                 }
 
                 previousFingerprint = snapshot.fingerprint()
-                val results = mutableListOf<Pair<GeminiLiveAgentClient.ToolCall, ActionResult>>()
+                val results = mutableListOf<Pair<AgentToolCall, ActionResult>>()
 
                 for (call in calls.take(MAX_CALLS_PER_TURN)) {
                     currentCoroutineContext().ensureActive()
 
                     val reason = call.args.optString("reason").trim()
-                    _state.update {
+                    updateState(service) {
                         it.copy(
                             step = step,
                             lastAction = buildString {
@@ -248,7 +252,7 @@ object ArtemisAgentLoop {
                     )
                     while (history.size > MAX_HISTORY) history.removeFirst()
 
-                    _state.update { it.copy(lastResult = result.detail.take(200)) }
+                    updateState(service) { it.copy(lastResult = result.detail.take(200)) }
                     delay(STABILIZE_MS)
                 }
 
@@ -256,7 +260,7 @@ object ArtemisAgentLoop {
 
                 if (step < MAX_STEPS) {
                     snapshot = service.snapshot() ?: snapshot
-                    screenshot = service.captureScreenshotBase64()
+                    screenshot = screenshotIfConvenient(service, snapshot)
                     val unchanged = previousFingerprint == snapshot.fingerprint()
                     observation = buildObservation(
                         goal = goal,
@@ -278,7 +282,7 @@ object ArtemisAgentLoop {
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (t: Throwable) {
-            MikuLog.d(TAG, "Error en el bucle Live: ${t.message}")
+            MikuLog.d(TAG, "Error en el bucle ARTEMIS: ${t.message}")
             finish(
                 success = false,
                 message = "No pude completar la tarea: ${t.message ?: t.javaClass.simpleName}",
@@ -292,7 +296,7 @@ object ArtemisAgentLoop {
 
     private suspend fun executeTool(
         executor: ActionExecutor,
-        call: GeminiLiveAgentClient.ToolCall,
+        call: AgentToolCall,
     ): ActionResult {
         val args = call.args
         return when (call.name) {
@@ -336,6 +340,40 @@ object ArtemisAgentLoop {
         }
     }
 
+    /**
+     * Actualiza el estado observable y refleja el progreso en el aviso flotante
+     * que el servicio de accesibilidad dibuja sobre cualquier app.
+     */
+    private fun updateState(
+        service: MikuAccessibilityService,
+        transform: (AgentState) -> AgentState,
+    ) {
+        _state.update(transform)
+        val current = _state.value
+        if (!current.running) return
+        val action = current.lastAction.ifBlank { "Preparando" }.take(80)
+        val result = current.lastResult.take(60)
+        val overlay = buildString {
+            append("Miku · paso ").append(current.step).append('/').append(current.maxSteps)
+            append('\n').append(action)
+            if (result.isNotBlank()) append('\n').append(result)
+        }
+        service.updateAgentOverlay(overlay)
+    }
+
+    /**
+     * La captura de pantalla cuesta varios segundos, así que solo se adjunta
+     * cuando el árbol UI llega casi vacío (pantallas sin texto accesible).
+     */
+    private suspend fun screenshotIfConvenient(
+        service: MikuAccessibilityService,
+        snapshot: ScreenSnapshot,
+    ): String? = if (snapshot.nodes.size < SCREENSHOT_IF_NODES_LESS_THAN) {
+        service.captureScreenshotBase64()
+    } else {
+        null
+    }
+
     private fun buildObservation(
         goal: String,
         step: Int,
@@ -374,7 +412,11 @@ object ArtemisAgentLoop {
         )
         appendLine(
             "Decide la siguiente herramienta. Usa índices del árbol; " +
-                "si el elemento no está indexado, usa coordenadas de la captura.",
+                "si el elemento no está indexado, usa coordenadas estimadas.",
+        )
+        appendLine(
+            "Si la tarea tiene más pasos (buscar contacto, abrir chat, escribir, enviar), " +
+                "continúa con la siguiente acción: no uses complete_task solo por abrir la app.",
         )
     }
 
@@ -397,6 +439,7 @@ object ArtemisAgentLoop {
         }
         job = null
         cancelNotification()
+        MikuAccessibilityService.instance?.hideAgentOverlay()
         runCatching { onFinished?.invoke(success, message) }
     }
 

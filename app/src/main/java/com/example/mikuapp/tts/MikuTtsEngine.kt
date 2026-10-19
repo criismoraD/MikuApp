@@ -182,6 +182,22 @@ class MikuTtsEngine(
                 return@withContext false
             }
 
+            // sherpa-onnx aborta el proceso si tokens.txt trae CRLF: su parser
+            // lee la primera línea (token espacio) como el token "3" y luego
+            // encuentra un duplicado en la línea "3 133". Copiamos siempre el
+            // asset corregido para sanear también instalaciones antiguas.
+            try {
+                context.assets.open("$MODEL_ASSET_DIR/$TOKENS_FILE").use { input ->
+                    tokensFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            } catch (t: Throwable) {
+                MikuLog.d(TAG, "No pude copiar tokens.txt: ${t.message}")
+                _error.value = "No pude preparar tokens.txt del TTS"
+                return@withContext false
+            }
+
             val vitsConfig = OfflineTtsVitsModelConfig(
                 model = modelFile.absolutePath,
                 tokens = File(modelDir, TOKENS_FILE).absolutePath,

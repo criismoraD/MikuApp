@@ -2,6 +2,7 @@ package com.example.mikuapp.util
 
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +38,7 @@ object MikuLog {
             }
             updated = buffer.toList()
         }
+        Log.d("MikuApp", "[$tag] ${message.take(2000)}")
         _entries.value = updated
     }
 

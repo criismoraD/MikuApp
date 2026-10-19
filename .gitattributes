@@ -1,0 +1,4 @@
+# Los assets del modelo TTS se consumen tal cual por sherpa-onnx.
+# No convertir CRLF/LF: un tokens.txt con CRLF hace que sherpa-onnx
+# detecte un token duplicado y termine el proceso con exit(-1).
+app/src/main/assets/vits-piper-es_MX-claude-high/** -text

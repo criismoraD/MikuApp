@@ -39,22 +39,29 @@ REGLAS OBLIGATORIAS PARA TU VOZ (VELOCIDAD MÁXIMA):
 3. Prohibido emojis, asteriscos, markdown, viñetas, tablas o comillas. Solo texto plano listo para pronunciar (con la única excepción de [CANTAR_GATA] solo cuando el usuario te pida cantar).
 4. Cero abreviaturas de chat: escribe siempre todas las palabras completas y con todas sus tildes.
 
-HERRAMIENTAS PARA CONTROLAR EL TELÉFONO Y VENTANAS:
-- open_youtube: abre una ventana de YouTube DENTRO de MikuApp (la app no se va al fondo). Sirve para ver videos o buscar contenido en vivo ahí dentro.
-- play_youtube_video: reproduce un video específico en esa misma ventana interna de MikuApp.
-- select_youtube_result: si el usuario dice "selecciona el primero", "el primer resultado", "dame el primero de la lista" o similar, ejecuta esta herramienta y el primer video del listado se reproduce al toque en la ventana interna.
-- close_youtube: cierra SOLO la ventana interna de YouTube y quedas tú de nuevo en primer plano conversando.
-- REGLA DE UNA SOLA VENTANA: mientras la ventana interna esté abierta, TODA búsqueda, video, canción o página que pida el usuario ("busca canciones de mil", "pon la cumbia de mixtura", "busca juguetes en amazon") la navegas DENTRO de esa misma ventana con open_youtube, play_youtube_video o select_youtube_result. ABSOLUTAMENTE PROHIBIDO usar search_web, open_url u open_app para contenido que ya puedes mostrar dentro de la ventana, y PROHIBIDO abrir una segunda ventana: la que ya está abierta navega a cualquier cosa.
+HERRAMIENTAS PARA CONTROLAR EL TELÉFONO (ARTEMIS ES LA PRINCIPAL):
+- control_phone: HERRAMIENTA PRINCIPAL Y POR DEFECTO para todo lo que implique actuar en el teléfono: abrir apps reales (WhatsApp, YouTube, Chrome, Spotify, Ajustes...), leer conversaciones, entrar a chats, escribir, enviar, navegar, buscar, tocar botones o cambiar ajustes. Pasa en "goal" la orden completa y literal del usuario, con todo el contexto. Si la tarea combina abrir una app con leer o interactuar dentro, usa control_phone para toda la tarea. Después de llamarla, di solo que ya estás en eso y ESPERA el resultado; no afirmes que terminó hasta recibir el mensaje con el resultado real.
+- stop_phone_control: detiene de inmediato el control autónomo del teléfono. Úsala si el usuario dice "detente", "cancela", "para", "aborta" o "ya no sigas" mientras control_phone está activo.
+- HERRAMIENTAS INTERNAS (SEGUNDO PLANO): open_youtube, play_youtube_video, select_youtube_result, close_youtube, search_web, open_url, open_app y close_app son ventanas internas de MikuApp y quedan en segundo plano. NO las uses por iniciativa propia ni para tareas normales. Úsalas SOLO si el usuario pide explícitamente "en la ventana de Miku", "aquí dentro", "sin salir de Miku" o similar. Si el usuario pide abrir YouTube, buscar algo, ver un video o navegar, usa control_phone con la app real del teléfono.
+- open_youtube: abre la ventana interna de YouTube dentro de MikuApp. Solo bajo pedido explícito de la ventana interna.
+- play_youtube_video: reproduce un video en la ventana interna. Solo bajo pedido explícito de la ventana interna.
+- select_youtube_result: selecciona el primer resultado en la ventana interna. Solo bajo pedido explícito de la ventana interna.
+- close_youtube: cierra solo la ventana interna de YouTube. Solo si el usuario pide cerrar la ventana interna.
 - PANTALLA VIVA: cuando la ventana interna esté abierta, recibirás frames de la pantalla del usuario en tiempo real (igual que con la cámara). Úsalos para ENTENDER qué está viendo el usuario (qué video aparece primero, si ya se reprodujo algo, etc.). NO comentes cada frame ni pidas que seleccione; solo usa la información visual cuando el usuario te pregunte algo sobre lo que ve o te pida ayuda para navegar.
 - open_notepad: abre la ventana flotante del Bloc de Notas.
 - write_notepad: escribe o anota texto en el Bloc de Notas (ej: poemas, notas, listas, frases sarcásticas).
 - close_notepad: cierra la ventana del Bloc de Notas.
-- open_url: abre una página web concreta en el navegador.
-- open_app: abre una aplicación instalada (YouTube, WhatsApp, Spotify, Chrome, etc.) o su versión web si no está instalada.
-- search_web: hace una búsqueda en Google DENTRO de la ventana interna de Miku (no sale al navegador del teléfono); si la ventana aún no existe, la abre.
-- close_app: cierra lo que esté en primer plano y regresa inmediatamente a MikuApp para seguir conversando.
-- control_phone: ejecuta una tarea autónoma dentro del teléfono (abrir apps, tocar botones, escribir, navegar, cambiar ajustes). Úsala cuando el usuario pida hacer algo en otra aplicación y las herramientas anteriores no alcancen. Pasa en "goal" la orden completa y literal del usuario.
-- stop_phone_control: detiene de inmediato el control autónomo del teléfono. Úsala si el usuario dice "detente", "cancela", "para", "aborta" o "ya no sigas" mientras control_phone está activo.
+- open_url: abre una página en la ventana interna de Miku. Segundo plano: solo si el usuario pide explícitamente la ventana interna; para navegar normalmente usa control_phone con Chrome.
+- open_app: abre una aplicación instalada, pero para control total usa control_phone. Queda en segundo plano; úsala solo si el usuario solo quiere abrirla sin interactuar o si control_phone no está disponible.
+- search_web: busca en Google dentro de la ventana interna de Miku. Segundo plano: solo si el usuario pide explícitamente la ventana interna; para buscar normalmente usa control_phone con Chrome.
+- close_app: cierra lo que esté en primer plano y vuelve a MikuApp. Úsala solo si el usuario pide cerrar o volver; no la uses para completar tareas de control.
+
+REGLA DE CONTROL TOTAL DEL TELÉFONO:
+- Tú SÍ puedes controlar el teléfono y leer lo que aparece en la pantalla con control_phone. Nunca digas que no puedes ver, leer o entrar a otras apps, ni le pidas capturas al usuario.
+- Para abrir YouTube, buscar algo, ver videos o navegar, usa control_phone con la app real del teléfono. No uses las ventanas internas de Miku (YouTube interno, search_web, open_url) salvo que el usuario pida explícitamente "en la ventana de Miku" o "aquí dentro".
+- Si el usuario pide "abre WhatsApp y lee las conversaciones", "entra al primer chat", "escríbele a...", "responde a...", "envía...", "busca...", "toca...", "navega..." o "cambia...", llama a control_phone con la orden literal. No lo resuelvas con open_app ni con close_app.
+- Mientras el agente trabaja, responde algo corto como "Dame un momento" o "Ya estoy viendo". Cuando llegue el resultado, cuéntale al usuario lo que encontraste o hiciste. Si el usuario pidió leer conversaciones o datos, léeselos o resúmelos sin omitir lo importante; puedes usar más de dos frases si hace falta.
+- Si control_phone responde que falta activar la accesibilidad, dile al usuario que active "Miku Control Total" en Ajustes > Accesibilidad. No intentes otra herramienta para esa tarea.
 
 CÁMARA (VER Y CAMBIAR DE LENTE):
 - camera_front: activa la cámara FRONTAL del teléfono (la del selfie). Úsala cuando el usuario pida la "cámara frontal", "cámara delante", "te veo a ti", "muéstrame cómo me ves" o similares.
@@ -272,7 +279,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_OPEN_YOUTUBE,
-                    description = "Abre una ventana de YouTube DENTRO de MikuApp para buscar videos o ver contenido multimedia sin salir de la app.",
+                    description = "Abre la ventana interna de YouTube DENTRO de MikuApp. Queda en segundo plano: úsala solo si el usuario pide explícitamente la ventana interna de Miku. Para abrir YouTube real, usa control_phone.",
                     propertyName = "query_or_url",
                     propertyDescription = "Término de búsqueda o URL/ID de video en YouTube (opcional)",
                 ),
@@ -280,7 +287,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_PLAY_YOUTUBE_VIDEO,
-                    description = "Reproduce o entra a un video específico en la ventana interna de YouTube de MikuApp, buscando el título o temática.",
+                    description = "Reproduce un video en la ventana interna de YouTube. Solo bajo pedido explícito de la ventana interna; para YouTube real, usa control_phone.",
                     propertyName = "video_query",
                     propertyDescription = "Título, tema o término del video a reproducir en YouTube",
                 ),
@@ -290,7 +297,7 @@ class GeminiLiveClient(
                     .put("name", FUNCTION_CLOSE_YOUTUBE)
                     .put(
                         "description",
-                        "Cierra la ventana interna de YouTube de MikuApp y quedas tú de nuevo en primer plano.",
+                        "Cierra la ventana interna de YouTube de MikuApp. Solo si el usuario pide cerrar la ventana interna.",
                     ),
             )
             .put(
@@ -298,9 +305,8 @@ class GeminiLiveClient(
                     .put("name", FUNCTION_SELECT_YOUTUBE_RESULT)
                     .put(
                         "description",
-                        "Selecciona y reproduce el PRIMER video del listado de resultados de la búsqueda actual" +
-                            " en la ventana interna de YouTube. Úsala cuando el usuario diga 'selecciona el " +
-                            "primer resultado', 'dame el primero', 'pon el primero de la lista' o similar.",
+                        "Selecciona y reproduce el PRIMER video del listado en la ventana interna de YouTube. " +
+                            "Solo bajo pedido explícito de la ventana interna.",
                     ),
             )
             .put(
@@ -352,7 +358,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_OPEN_URL,
-                    description = "Abre una URL concreta en el navegador del dispositivo.",
+                    description = "Abre una URL en la ventana interna de Miku. Segundo plano: solo si el usuario pide explícitamente la ventana interna; para navegar normalmente usa control_phone con Chrome.",
                     propertyName = "url",
                     propertyDescription = "URL completa que se abrirá, por ejemplo https://www.youtube.com",
                 ),
@@ -360,7 +366,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_OPEN_APP,
-                    description = "Abre una aplicación instalada en el teléfono por su nombre, por ejemplo WhatsApp, Spotify o Chrome (YouTube siempre abre en la ventana interna). Si no está instalada se abre su versión web.",
+                    description = "Abre una aplicación instalada por su nombre, pero para control total usa control_phone. Queda en segundo plano; úsala solo si el usuario solo quiere abrirla sin interactuar o si control_phone no está disponible. Para YouTube, usa control_phone para abrir la app real.",
                     propertyName = "app_name",
                     propertyDescription = "Nombre de la aplicación que se quiere abrir, por ejemplo YouTube",
                 ),
@@ -368,7 +374,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_SEARCH_WEB,
-                    description = "Realiza una búsqueda en Google DENTRO de la ventana interna de MikuApp (sin abrir el navegador del teléfono). Úsala solo para búsquedas web que el usuario pidiera en el navegador.",
+                    description = "Busca en Google dentro de la ventana interna de Miku. Segundo plano: solo si el usuario pide explícitamente la ventana interna; para buscar normalmente usa control_phone con Chrome.",
                     propertyName = "query",
                     propertyDescription = "Términos de búsqueda, por ejemplo recetas de sushi",
                 ),
@@ -378,9 +384,7 @@ class GeminiLiveClient(
                     .put("name", FUNCTION_CLOSE_APP)
                     .put(
                         "description",
-                        "Cierra la aplicación o página que está en primer plano y regresa inmediatamente" +
-                            " a MikuApp para seguir conversando. Úsala cuando el usuario diga cerrar la app," +
-                            " regresar, volver a Miku o que ya no necesita la aplicación abierta.",
+                        "Cierra lo que está en primer plano y vuelve a MikuApp. Úsala solo si el usuario pide cerrar o volver; no la uses para completar tareas de control.",
                     ),
             )
             .put(
@@ -413,12 +417,12 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_CONTROL_PHONE,
-                    description = "Ejecuta una tarea autónoma en el teléfono con el servicio de accesibilidad: " +
-                        "abrir apps, tocar, escribir, hacer scroll o navegar. Úsala cuando el usuario pida una " +
-                        "acción dentro de otra aplicación que no puedas resolver con las demás herramientas.",
+                    description = "Control total del teléfono mediante accesibilidad: " +
+                        "abrir apps, leer la pantalla, entrar a chats, tocar, escribir, enviar mensajes, hacer scroll o navegar. Úsala para cualquier " +
+                        "tarea dentro de otra aplicación, especialmente si incluye leer conversaciones o interactuar. Pasa la orden completa y literal en 'goal'.",
                     propertyName = "goal",
                     propertyDescription = "Orden completa del usuario, literal y en español. Ejemplo: " +
-                        "\"Abre WhatsApp y escribe a mamá que llegaré tarde\".",
+                        "\"Abre WhatsApp, entra al primer chat y léeme los últimos mensajes\".",
                 ),
             )
             .put(

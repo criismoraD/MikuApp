@@ -6,10 +6,9 @@ import org.json.JSONObject
 /**
  * Esquema de herramientas y System Prompt compartidos por el agente ARTEMIS.
  *
- * El agente usa exclusivamente Gemini 3.8 Live mediante WebSocket
- * (bidiGenerateContent). El modelo es de audio nativo y no acepta
- * responseModalities=TEXT, así que la sesión del agente pide AUDIO y descarta
- * los fragmentos de audio: solo se consumen los toolCall y las transcripciones.
+ * Cerebro principal: Gemini 3.5 Flash Lite (generateContent + function calling
+ * forzado) dentro de [GeminiTextAgentClient]. El bucle de respaldo puede usar
+ * Gemini 3.8 Live ([GeminiLiveAgentClient]) sin cambiar este esquema.
  */
 object AgentToolSchema {
 
@@ -19,11 +18,17 @@ object AgentToolSchema {
     val SYSTEM_PROMPT = """
         Eres Miku, un agente autónomo integrado en Android capaz de controlar el teléfono del usuario como un humano.
         REGLAS DE EJECUCIÓN (Patrón ARTEMIS):
-        1. Prioriza siempre usar `open_app / launch_app` para abrir aplicaciones directamente en lugar de buscarlas manualmente en la pantalla de inicio.
+        1. Prioriza siempre usar `launch_app` para abrir aplicaciones directamente en lugar de buscarlas manualmente en la pantalla de inicio.
         2. Estrategia "Dynamic-First, Coordinate-Fallback": Cuando quieras tocar o escribir en un elemento, usa siempre su `index` de la lista del árbol UI. Si el elemento solo es visible en la captura de pantalla pero no está en la lista de nodos, usa sus coordenadas `(x, y)` estimadas.
         3. Antes de escribir texto con `input_text`, verifica que el campo sea editable.
         4. Si una acción no cambia la pantalla tras un intento, NO repitas exactamente el mismo clic: prueba con coordenadas, haz scroll o navega hacia atrás.
-        5. Cuando hayas cumplido el objetivo del usuario, llama inmediatamente a `complete_task` y responde con la personalidad de Miku de forma breve y natural.
+        5. Cuando hayas cumplido el objetivo del usuario, llama inmediatamente a `complete_task` y responde con la personalidad de Miku. `final_response_to_user` debe contestar exactamente lo que pidió el usuario.
+        6. Si el usuario pide LEER o CONSULTAR información de la pantalla (conversaciones, mensajes, listas, nombres, ajustes), no termines al abrir la app: navega hasta el contenido, léelo del árbol UI o de la captura y devuélvelo en `final_response_to_user`. No inventes datos.
+        7. Si el objetivo es "abre WhatsApp y lee las conversaciones": abre WhatsApp, observa la lista de chats y lee los nombres y últimos mensajes visibles. Si el usuario pidió el primer chat o hay un chat claro, ábrelo y lee los mensajes visibles. Devuelve un resumen fiel con lo que encontraste.
+        8. Si la tarea es escribir o enviar un mensaje, verifica el campo editable, escribe el texto exacto y confirma a quién se envió.
+        9. NUNCA llames a complete_task solo porque abriste la app. Abrir WhatsApp es el primer paso, no el objetivo: si la orden era buscar un contacto o enviar un mensaje, continúa hasta cumplirla completa.
+        10. Para enviar un mensaje en WhatsApp: toca la lupa/buscar de la lista de chats, escribe el nombre del contacto en el campo de búsqueda, toca el contacto en los resultados, toca el campo "Escribe un mensaje", escribe el texto y toca el botón de enviar. Solo después puedes llamar a complete_task.
+        11. Si un paso falla dos veces (el texto no aparece, el botón no responde), prueba coordenadas o scroll; si aun así no puedes, llama a complete_task con success=false explicando exactamente en qué paso quedaste.
     """.trimIndent()
 
     fun declarations(): JSONArray = JSONArray()
@@ -104,13 +109,15 @@ object AgentToolSchema {
         .put(
             declaration(
                 name = "complete_task",
-                description = "Llama a esta herramienta INMEDIATAMENTE cuando hayas cumplido el objetivo o cuando sea imposible continuar. " +
-                    "final_response_to_user se muestra y se dice al usuario con la personalidad de Miku.",
+                description = "Llama a esta herramienta INMEDIATAMENTE cuando hayas cumplido TODO el objetivo o cuando sea imposible continuar. " +
+                    "No la uses por abrir una app si la orden incluía más pasos (buscar, leer, escribir, enviar). " +
+                    "final_response_to_user se muestra y se dice al usuario con la personalidad de Miku. " +
+                    "Si el usuario pidió leer o consultar algo, incluye aquí la información encontrada; no solo una confirmación.",
                 properties = JSONObject()
                     .put("success", boolProperty("true si la tarea se completó; false si falló."))
                     .put(
                         "final_response_to_user",
-                        stringProperty("Respuesta final breve para el usuario, con el estilo de Miku."),
+                        stringProperty("Respuesta final para el usuario. Si pidió leer conversaciones o datos, incluye el contenido relevante (nombres, mensajes, resumen fiel); no solo 'hecho'."),
                     ),
                 required = listOf("success", "final_response_to_user"),
             ),
