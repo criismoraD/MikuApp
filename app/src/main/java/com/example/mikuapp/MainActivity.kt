@@ -1209,6 +1209,10 @@ private fun MikuYouTubeOverlay(
         onDispose { webView.destroy() }
     }
 
+    val windowLabel = when {
+        url.contains("youtube") -> "YouTube dentro de Miku"
+        else -> "Ventana interna de Miku"
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1230,7 +1234,7 @@ private fun MikuYouTubeOverlay(
             ) {
                 Text(text = "▶", fontSize = 14.sp, color = MikuCyan)
                 Text(
-                    text = "YouTube dentro de Miku",
+                    text = windowLabel,
                     color = MikuOnSurface,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,

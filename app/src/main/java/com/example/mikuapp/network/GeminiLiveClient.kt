@@ -44,12 +44,13 @@ HERRAMIENTAS PARA CONTROLAR EL TELÉFONO Y VENTANAS:
 - play_youtube_video: reproduce un video específico en esa misma ventana interna de MikuApp.
 - select_youtube_result: si el usuario dice "selecciona el primero", "el primer resultado", "dame el primero de la lista" o similar, ejecuta esta herramienta y el primer video del listado se reproduce al toque en la ventana interna.
 - close_youtube: cierra SOLO la ventana interna de YouTube y quedas tú de nuevo en primer plano conversando.
+- REGLA DE UNA SOLA VENTANA: mientras la ventana interna esté abierta, TODA búsqueda, video, canción o página que pida el usuario ("busca canciones de mil", "pon la cumbia de mixtura", "busca juguetes en amazon") la navegas DENTRO de esa misma ventana con open_youtube, play_youtube_video o select_youtube_result. ABSOLUTAMENTE PROHIBIDO usar search_web, open_url u open_app para contenido que ya puedes mostrar dentro de la ventana, y PROHIBIDO abrir una segunda ventana: la que ya está abierta navega a cualquier cosa.
 - open_notepad: abre la ventana flotante del Bloc de Notas.
 - write_notepad: escribe o anota texto en el Bloc de Notas (ej: poemas, notas, listas, frases sarcásticas).
 - close_notepad: cierra la ventana del Bloc de Notas.
 - open_url: abre una página web concreta en el navegador.
 - open_app: abre una aplicación instalada (YouTube, WhatsApp, Spotify, Chrome, etc.) o su versión web si no está instalada.
-- search_web: hace una búsqueda en Google.
+- search_web: hace una búsqueda en Google DENTRO de la ventana interna de Miku (no sale al navegador del teléfono); si la ventana aún no existe, la abre.
 - close_app: cierra lo que esté en primer plano y regresa inmediatamente a MikuApp para seguir conversando.
 
 CÁMARA (VER Y CAMBIAR DE LENTE):
@@ -356,7 +357,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_OPEN_APP,
-                    description = "Abre una aplicación instalada en el teléfono por su nombre, por ejemplo YouTube, WhatsApp, Spotify o Chrome. Si no está instalada se abre su versión web.",
+                    description = "Abre una aplicación instalada en el teléfono por su nombre, por ejemplo WhatsApp, Spotify o Chrome (YouTube siempre abre en la ventana interna). Si no está instalada se abre su versión web.",
                     propertyName = "app_name",
                     propertyDescription = "Nombre de la aplicación que se quiere abrir, por ejemplo YouTube",
                 ),
@@ -364,7 +365,7 @@ class GeminiLiveClient(
             .put(
                 functionDeclaration(
                     name = FUNCTION_SEARCH_WEB,
-                    description = "Realiza una búsqueda en Google con el texto indicado.",
+                    description = "Realiza una búsqueda en Google DENTRO de la ventana interna de MikuApp (sin abrir el navegador del teléfono). Úsala solo para búsquedas web que el usuario pidiera en el navegador.",
                     propertyName = "query",
                     propertyDescription = "Términos de búsqueda, por ejemplo recetas de sushi",
                 ),

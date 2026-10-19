@@ -85,6 +85,36 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleWindowCommands(userText: String): Boolean {
         val t = userText.lowercase()
+
+        // "selecciona el primer resultado" / "dame el primero de la lista"
+        val firstResult = Regex(
+            "\\b(selecciona|seleccione|elige|dame|abre|pon(?:me)?|reproduce(?:me)?|busca)\\b[^.!?]{0,24}\\bprimer[oa]?\\b",
+            RegexOption.IGNORE_CASE,
+        )
+        if (_youtubeUrl.value != null && firstResult.containsMatchIn(t)) {
+            selectFirstYoutubeResult()
+            return true
+        }
+
+        // "pon canciones de mil en youtube" → busca dentro de la ventana
+        val ytSearch = Regex(
+            "(?:búscame|buscame|busca|encuentra|pon(?:me)?|reproduce(?:me)?|quiero\\s+ver|quiero\\s+escuchar)\\s+(.+?)\\s+(?:videos?\\s+de\\s+|la\\s+|el\\s+|en\\s+)?[yi]outube",
+            RegexOption.IGNORE_CASE,
+        )
+        ytSearch.find(t)?.let { m ->
+            openYoutubeWindow(m.groupValues[1].trim())
+            return true
+        }
+        // "busca en youtube canciones de mil"
+        val ytSearchRev = Regex(
+            "(?:búscame|buscame|busca|encuentra)\\s+(?:en\\s+|el\\s+|la\\s+)?[yi]outube\\s+(?:un\\s+|una\\s+|el\\s+|la\\s+|videos?\\s+de\\s+|video\\s+de\\s+)?(.+)",
+            RegexOption.IGNORE_CASE,
+        )
+        ytSearchRev.find(t)?.let { m ->
+            openYoutubeWindow(m.groupValues[1].trim())
+            return true
+        }
+
         val closeVerb = listOf("cierra", "apaga", "quita", "desactiva", "sal de", "cerra")
         if (closeVerb.none { t.contains(it) }) return false
         if (t.contains("cámara") || t.contains("camara")) {
@@ -95,7 +125,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             }
             return true
         }
-        if (t.contains("youtube")) {
+        if (t.contains("youtube") || t.contains("yutube") || t.contains("yutu")) {
             if (_youtubeUrl.value != null) {
                 _youtubeUrl.value = null
                 MikuLog.d(TAG, "YouTube cerrado por comando de voz")
@@ -221,6 +251,9 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     @Volatile
     private var modelTurnInProgress = false
+
+    @Volatile
+    private var lastTextChunk: String? = null
 
     @Volatile
     private var gataSongRequestedInTurn = false
@@ -747,6 +780,11 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
                 responseBuilder.setLength(0)
                 userTurnActive = false
             }
+            if (text.isNotBlank() && text == lastTextChunk) {
+                MikuLog.d(TAG, "Chunk de texto duplicado del modelo ignorado: \"${text.take(60)}\"")
+                return
+            }
+            lastTextChunk = text
             val cleanedForDisplay = text.replace(Regex("\\[CANTAR_GATA\\]", RegexOption.IGNORE_CASE), "")
             sentenceBuffer.append(cleanedForDisplay)
             responseBuilder.append(cleanedForDisplay)
@@ -783,6 +821,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onTurnComplete() {
             lastModelActivityAt = System.currentTimeMillis()
+            lastTextChunk = null
             sentenceBuffer.flush()
             geminiAudio.turnComplete()
             modelTurnInProgress = false

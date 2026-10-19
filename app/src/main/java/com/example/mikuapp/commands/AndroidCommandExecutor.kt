@@ -131,11 +131,8 @@ class AndroidCommandExecutor(
     private fun searchWeb(query: String): JSONObject {
         if (query.isBlank()) return errorResult("Falta el término de búsqueda")
         val url = "https://www.google.com/search?q=${urlEncode(query)}"
-        return if (launchUrl(url)) {
-            okResult("query" to query, "modo" to "búsqueda web")
-        } else {
-            errorResult("No se pudo abrir el navegador para buscar")
-        }
+        onYoutubeAction?.invoke("search", url)
+        return okResult("query" to query, "modo" to "ventana interna de Miku")
     }
 
     private fun openApp(appName: String): JSONObject {
