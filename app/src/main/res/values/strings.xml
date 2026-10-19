@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">MikuApp</string>
+    <string name="accessibility_service_label">Miku Control Total</string>
+    <string name="accessibility_service_description">Permite a Miku observar la pantalla y ejecutar toques, gestos y texto para completar tareas que tú le pidas. Todo el control ocurre en tu dispositivo y puedes detenerlo en cualquier momento.</string>
 </resources>

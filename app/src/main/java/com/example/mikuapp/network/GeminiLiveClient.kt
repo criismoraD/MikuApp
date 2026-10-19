@@ -53,6 +53,8 @@ HERRAMIENTAS PARA CONTROLAR EL TELÉFONO Y VENTANAS:
 - open_app: abre una aplicación instalada (YouTube, WhatsApp, Spotify, Chrome, etc.) o su versión web si no está instalada.
 - search_web: hace una búsqueda en Google DENTRO de la ventana interna de Miku (no sale al navegador del teléfono); si la ventana aún no existe, la abre.
 - close_app: cierra lo que esté en primer plano y regresa inmediatamente a MikuApp para seguir conversando.
+- control_phone: ejecuta una tarea autónoma dentro del teléfono (abrir apps, tocar botones, escribir, navegar, cambiar ajustes). Úsala cuando el usuario pida hacer algo en otra aplicación y las herramientas anteriores no alcancen. Pasa en "goal" la orden completa y literal del usuario.
+- stop_phone_control: detiene de inmediato el control autónomo del teléfono. Úsala si el usuario dice "detente", "cancela", "para", "aborta" o "ya no sigas" mientras control_phone está activo.
 
 CÁMARA (VER Y CAMBIAR DE LENTE):
 - camera_front: activa la cámara FRONTAL del teléfono (la del selfie). Úsala cuando el usuario pida la "cámara frontal", "cámara delante", "te veo a ti", "muéstrame cómo me ves" o similares.
@@ -408,6 +410,26 @@ class GeminiLiveClient(
                             " cámara, quitar la cámara o dejar de mostrarle lo que ve."
                     ),
             )
+            .put(
+                functionDeclaration(
+                    name = FUNCTION_CONTROL_PHONE,
+                    description = "Ejecuta una tarea autónoma en el teléfono con el servicio de accesibilidad: " +
+                        "abrir apps, tocar, escribir, hacer scroll o navegar. Úsala cuando el usuario pida una " +
+                        "acción dentro de otra aplicación que no puedas resolver con las demás herramientas.",
+                    propertyName = "goal",
+                    propertyDescription = "Orden completa del usuario, literal y en español. Ejemplo: " +
+                        "\"Abre WhatsApp y escribe a mamá que llegaré tarde\".",
+                ),
+            )
+            .put(
+                JSONObject()
+                    .put("name", FUNCTION_STOP_PHONE_CONTROL)
+                    .put(
+                        "description",
+                        "Detiene inmediatamente el control autónomo del teléfono. Úsala si el usuario pide " +
+                            "detenerse, cancelar, abortar o parar mientras hay una tarea de control en curso.",
+                    ),
+            )
 
         return JSONObject().put(
             "setup",
@@ -599,6 +621,8 @@ class GeminiLiveClient(
         const val FUNCTION_CAMERA_FRONT = "camera_front"
         const val FUNCTION_CAMERA_BACK = "camera_back"
         const val FUNCTION_CLOSE_CAMERA = "close_camera"
+        const val FUNCTION_CONTROL_PHONE = "control_phone"
+        const val FUNCTION_STOP_PHONE_CONTROL = "stop_phone_control"
 
         private const val TAG = "Gemini"
 

@@ -9,6 +9,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.mikuapp.audio.AudioRecorder
 import com.example.mikuapp.audio.GeminiAudioPlayer
 import com.example.mikuapp.audio.MikuRuntimeService
+import com.example.mikuapp.agent.AgentState
+import com.example.mikuapp.agent.ArtemisAgentLoop
+import com.example.mikuapp.agent.MikuAccessibilityService
 import com.example.mikuapp.commands.AndroidCommandExecutor
 import com.example.mikuapp.expressions.ExpressionDetector
 import com.example.mikuapp.expressions.MikuExpression
@@ -26,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLDecoder
@@ -266,6 +270,8 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _connectionState = MutableStateFlow(GeminiLiveClient.ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<GeminiLiveClient.ConnectionState> = _connectionState.asStateFlow()
+
+    val agentState: StateFlow<AgentState> = ArtemisAgentLoop.state
 
     private val _isInitializing = MutableStateFlow(false)
     val isInitializing: StateFlow<Boolean> = _isInitializing.asStateFlow()
@@ -679,6 +685,70 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         MikuLog.clear()
     }
 
+    /**
+     * Lanza una tarea ARTEMIS nativa. Se puede invocar por voz
+     * (control_phone) o desde la UI de diagnóstico.
+     */
+    fun startAgentTask(goal: String) {
+        val cleanGoal = goal.trim()
+        if (cleanGoal.isBlank()) {
+            _statusMessage.value = "Dime qué tarea quieres que Miku haga en el teléfono"
+            return
+        }
+        if (!MikuAccessibilityService.isServiceEnabled(getApplication())) {
+            _statusMessage.value =
+                "Activa «Miku Control Total» en Ajustes > Accesibilidad para controlar el teléfono"
+            return
+        }
+
+        val started = ArtemisAgentLoop.start(
+            goal = cleanGoal,
+            apiKey = BuildConfig.GEMINI_API_KEY,
+        ) { success, message ->
+            _statusMessage.value = message
+            val announcement = if (success) {
+                "La tarea terminó bien. Cuéntale al usuario el resultado con tu estilo, " +
+                    "en una o dos frases: $message"
+            } else {
+                "La tarea falló. Explícale al usuario qué pasó con tu estilo, " +
+                    "en una o dos frases: $message"
+            }
+            geminiClient?.takeIf { it.isConnected }?.sendTextMessage(announcement)
+        }
+
+        if (started) {
+            MikuLog.d(TAG, "Tarea ARTEMIS iniciada: $cleanGoal")
+            _statusMessage.value = "Miku está controlando el teléfono..."
+        } else {
+            _statusMessage.value = ArtemisAgentLoop.state.value.finalMessage
+                ?: "Ya hay una tarea de control en curso"
+        }
+    }
+
+    fun stopAgentTask() {
+        ArtemisAgentLoop.stop("Detenido por el usuario")
+        _statusMessage.value = "Control del teléfono detenido"
+    }
+
+    fun clearAgentResult() {
+        ArtemisAgentLoop.clearResult()
+    }
+
+    private fun esComandoDetenerAgente(raw: String): Boolean {
+        val norm = raw.lowercase()
+            .replace('á', 'a')
+            .replace('é', 'e')
+            .replace('í', 'i')
+            .replace('ó', 'o')
+            .replace('ú', 'u')
+        return Regex("\\b(detente|deten|detenga|aborta|cancela|paralo|parala)\\b")
+            .containsMatchIn(norm) ||
+            norm.contains("para la tarea") ||
+            norm.contains("deten la tarea") ||
+            norm.contains("para el control") ||
+            norm.contains("deten el control")
+    }
+
     private fun startRecorder() {
         val client = geminiClient ?: return
         if (!hasRecordPermission()) {
@@ -820,6 +890,14 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             userSpeechBuilder.append(text)
             val userText = userSpeechBuilder.toString().trim()
             _userSpeech.value = userText
+
+            // Parada de emergencia del agente por voz, antes de cualquier otra lógica.
+            if (ArtemisAgentLoop.state.value.running && esComandoDetenerAgente(userText)) {
+                MikuLog.d(TAG, "Parada del agente ARTEMIS por comando de voz: $userText")
+                stopAgentTask()
+                return
+            }
+
             // Comandos de ventana: SIEMPRE se procesan, incluso durante turnos del modelo
             if (handleWindowCommands(userText)) return
             // Conversación normal solo si Miku no está hablando y el modelo no genera
@@ -880,7 +958,40 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             val client = geminiClient ?: return
             MikuLog.d(TAG, "Ejecutando ${call.name}...")
             viewModelScope.launch(Dispatchers.IO) {
-                val result = commandExecutor.execute(call.name, call.args)
+                val result = when (call.name) {
+                    GeminiLiveClient.FUNCTION_CONTROL_PHONE -> {
+                        val goal = call.args.optString("goal").trim()
+                        when {
+                            goal.isBlank() -> JSONObject()
+                                .put("result", "error")
+                                .put("message", "Falta el objetivo de la tarea en 'goal'.")
+
+                            !MikuAccessibilityService.isServiceEnabled(getApplication()) -> JSONObject()
+                                .put("result", "error")
+                                .put(
+                                    "message",
+                                    "El usuario debe activar «Miku Control Total» en Ajustes > Accesibilidad.",
+                                )
+
+                            else -> {
+                                startAgentTask(goal)
+                                JSONObject()
+                                    .put("result", "ok")
+                                    .put("message", "Control iniciado. Miku ya está observando la pantalla.")
+                                    .put("goal", goal)
+                            }
+                        }
+                    }
+
+                    GeminiLiveClient.FUNCTION_STOP_PHONE_CONTROL -> {
+                        stopAgentTask()
+                        JSONObject()
+                            .put("result", "ok")
+                            .put("message", "Control del teléfono detenido.")
+                    }
+
+                    else -> commandExecutor.execute(call.name, call.args)
+                }
                 MikuLog.d(TAG, "Resultado de ${call.name}: $result")
                 client.sendFunctionResponse(call.id, call.name, result)
             }
