@@ -13,6 +13,7 @@ class AndroidCommandExecutor(
     private val context: Context,
     private val onNotepadAction: ((action: String, text: String) -> Unit)? = null,
     private val onCameraLensRequest: ((front: Boolean) -> Unit)? = null,
+    private val onYoutubeAction: ((action: String, url: String) -> Unit)? = null,
 ) {
 
     private data class KnownApp(
@@ -24,8 +25,8 @@ class AndroidCommandExecutor(
     fun execute(name: String, args: JSONObject): JSONObject = try {
         when (name) {
             FUNCTION_OPEN_YOUTUBE -> openYoutube(args.optString("query_or_url"))
-            FUNCTION_PLAY_YOUTUBE_VIDEO -> playYoutubeVideo(args.optString("video_query"))
-            FUNCTION_CLOSE_YOUTUBE -> returnToMiku()
+            FUNCTION_PLAY_YOUTUBE_VIDEO -> openYoutube(args.optString("video_query"))
+            FUNCTION_CLOSE_YOUTUBE -> closeYoutubeWindow()
             FUNCTION_OPEN_NOTEPAD -> openNotepad(args.optString("initial_text"))
             FUNCTION_WRITE_NOTEPAD -> writeNotepad(args.optString("text"), args.optString("mode"))
             FUNCTION_CLOSE_NOTEPAD -> closeNotepad()
@@ -51,31 +52,18 @@ class AndroidCommandExecutor(
 
     private fun openYoutube(queryOrUrl: String): JSONObject {
         val trimmed = queryOrUrl.trim()
-        if (trimmed.isNotBlank()) {
-            return playYoutubeVideo(trimmed)
+        val url = when {
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            trimmed.isNotBlank() -> "https://m.youtube.com/results?search_query=${urlEncode(trimmed)}"
+            else -> "https://m.youtube.com"
         }
-        return openApp("youtube")
+        onYoutubeAction?.invoke("open", url)
+        return okResult("youtube" to url, "modo" to "ventana interna de Miku")
     }
 
-    private fun playYoutubeVideo(videoQuery: String): JSONObject {
-        val query = videoQuery.trim()
-        val url = if (query.startsWith("http://") || query.startsWith("https://")) {
-            query
-        } else {
-            "https://www.youtube.com/results?search_query=${urlEncode(query)}"
-        }
-        val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            setPackage("com.google.android.youtube")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        if (safeStart(appIntent)) {
-            return okResult("youtube" to query, "modo" to "app_nativa")
-        }
-        return if (launchUrl(url)) {
-            okResult("youtube" to query, "modo" to "navegador")
-        } else {
-            errorResult("No se pudo abrir el video en YouTube")
-        }
+    private fun closeYoutubeWindow(): JSONObject {
+        onYoutubeAction?.invoke("close", "")
+        return okResult("youtube" to "cerrado", "modo" to "ventana interna de Miku")
     }
 
     private fun openNotepad(initialText: String): JSONObject {

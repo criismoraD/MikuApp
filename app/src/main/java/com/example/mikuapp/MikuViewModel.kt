@@ -47,6 +47,13 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     private val _notepadTitle = MutableStateFlow("Miku_Notas.txt")
     val notepadTitle: StateFlow<String> = _notepadTitle.asStateFlow()
 
+    private val _youtubeUrl = MutableStateFlow<String?>(null)
+    val youtubeUrl: StateFlow<String?> = _youtubeUrl.asStateFlow()
+
+    fun closeYoutubeWindow() {
+        _youtubeUrl.value = null
+    }
+
     private val commandExecutor = AndroidCommandExecutor(
         context = application,
         onNotepadAction = { action, text ->
@@ -78,6 +85,19 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             lastCameraFrameAt = 0L
             MikuLog.d(TAG, "Cámara ${if (front) "FRONTAL" else "TRASERA"} solicitada${if (cameraOn) " (cambiando lente)" else " (encendiendo cámara)"}")
             _statusMessage.value = if (front) "Cámara frontal encendida" else "Cámara trasera encendida"
+        },
+        onYoutubeAction = { action, url ->
+            when (action) {
+                "open" -> {
+                    _youtubeUrl.value = url
+                    MikuLog.d(TAG, "Ventana interna de YouTube: $url")
+                    _statusMessage.value = "YouTube abierto dentro de Miku"
+                }
+                "close" -> {
+                    _youtubeUrl.value = null
+                    _statusMessage.value = "Ventana de YouTube cerrada"
+                }
+            }
         },
     )
 
@@ -126,6 +146,13 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     private var expressionTimerJob: Job? = null
 
     private var lastCameraFrameAt = 0L
+    @Volatile
+    private var lastModelActivityAt = 0L
+    @Volatile
+    private var lastUserSpeechAt = 0L
+    @Volatile
+    private var lastAutoReconnectAt = 0L
+    private var sessionWatchdogJob: Job? = null
 
     @Volatile
     private var lastSpeechEndedAt = 0L
@@ -294,6 +321,9 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             listener = listener,
         )
         geminiClient = client
+        lastModelActivityAt = 0L
+        lastUserSpeechAt = 0L
+        lastAutoReconnectAt = 0L
         sentenceBuffer.reset()
         stateCollectionJob?.cancel()
         stateCollectionJob = viewModelScope.launch {
@@ -301,7 +331,40 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
                 _connectionState.value = state
             }
         }
+        startSessionWatchdog()
         client.connect()
+    }
+
+    private fun startSessionWatchdog() {
+        sessionWatchdogJob?.cancel()
+        sessionWatchdogJob = viewModelScope.launch {
+            while (true) {
+                delay(5_000)
+                checkSilentStall()
+            }
+        }
+    }
+
+    private fun checkSilentStall() {
+        val client = geminiClient ?: return
+        if (!client.isConnected) return
+        if (audioRecorder == null) return
+        if (modelTurnInProgress) return
+        if (isSpeaking.value || ttsEngine.isSongPlaying) return
+        if (sentenceBuffer.queuedCount.value > 0) return
+        val now = System.currentTimeMillis()
+        if (lastModelActivityAt <= 0L || lastUserSpeechAt <= 0L) return
+        if (now - lastUserSpeechAt < 18_000L) return
+        if (now - lastModelActivityAt < 25_000L) return
+        if (now - lastAutoReconnectAt < 90_000L) return
+        lastAutoReconnectAt = now
+        MikuLog.d(TAG, "Watchdog: Gemini recibió voz hace ${(now - lastUserSpeechAt) / 1000}s y no responde; reconectando sesión")
+        _statusMessage.value = "Miku se quedó en blanco, reconectando..."
+        disconnect()
+        viewModelScope.launch {
+            delay(1_200)
+            connect(lastApiKey)
+        }
     }
 
     fun disconnect() {
@@ -309,6 +372,10 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         pendingPrompt = null
         stateCollectionJob?.cancel()
         stateCollectionJob = null
+        sessionWatchdogJob?.cancel()
+        sessionWatchdogJob = null
+        lastModelActivityAt = 0L
+        lastUserSpeechAt = 0L
         clearExpression("sesion")
         stopRecorder()
         MikuRuntimeService.stop(getApplication())
@@ -565,6 +632,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onTextChunk(text: String) {
+            lastModelActivityAt = System.currentTimeMillis()
             modelTurnInProgress = true
             if (userTurnActive) {
                 responseBuilder.setLength(0)
@@ -577,6 +645,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onInputTranscription(text: String) {
+            lastUserSpeechAt = System.currentTimeMillis()
             if ((isSpeaking.value && !ttsEngine.isSongPlaying) || modelTurnInProgress) return
             if (!userTurnActive) {
                 userSpeechBuilder.setLength(0)
@@ -597,11 +666,13 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onAudioChunk(pcm16: ByteArray, sampleRate: Int) {
+            lastModelActivityAt = System.currentTimeMillis()
             modelTurnInProgress = true
             geminiAudio.play(pcm16, sampleRate)
         }
 
         override fun onTurnComplete() {
+            lastModelActivityAt = System.currentTimeMillis()
             sentenceBuffer.flush()
             geminiAudio.turnComplete()
             modelTurnInProgress = false
@@ -625,6 +696,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
                 return
             }
             MikuLog.d(TAG, "Interrupción: descartando frases pendientes")
+            lastModelActivityAt = System.currentTimeMillis()
             modelTurnInProgress = false
             clearExpression("interrumpida")
             sentenceBuffer.reset()
@@ -634,6 +706,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onFunctionCall(call: GeminiLiveClient.FunctionCall) {
+            lastModelActivityAt = System.currentTimeMillis()
             val client = geminiClient ?: return
             MikuLog.d(TAG, "Ejecutando ${call.name}...")
             viewModelScope.launch(Dispatchers.IO) {

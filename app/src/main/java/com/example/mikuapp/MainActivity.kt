@@ -142,6 +142,7 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
     val notepadVisible by viewModel.notepadVisible.collectAsStateWithLifecycle()
     val notepadContent by viewModel.notepadContent.collectAsStateWithLifecycle()
     val notepadTitle by viewModel.notepadTitle.collectAsStateWithLifecycle()
+    val youtubeUrl by viewModel.youtubeUrl.collectAsStateWithLifecycle()
 
     var debugPanelOpen by remember { mutableStateOf(false) }
 
@@ -367,6 +368,13 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
                 onContentChange = viewModel::setNotepadContent,
                 onClear = viewModel::clearNotepad,
                 onClose = viewModel::closeNotepad,
+            )
+        }
+
+        youtubeUrl?.let { url ->
+            MikuYouTubeOverlay(
+                url = url,
+                onClose = viewModel::closeYoutubeWindow,
             )
         }
     }
@@ -1173,6 +1181,77 @@ private fun MikuNotepadOverlay(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MikuYouTubeOverlay(
+    url: String,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    val webView = remember(url) {
+        android.webkit.WebView(context.applicationContext).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            webChromeClient = android.webkit.WebChromeClient()
+            webViewClient = android.webkit.WebViewClient()
+            loadUrl(url)
+        }
+    }
+
+    DisposableEffect(webView) {
+        onDispose { webView.destroy() }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xE6010807))
+            .systemBarsPadding()
+            .padding(12.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF092923), RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(text = "▶", fontSize = 14.sp, color = MikuCyan)
+                Text(
+                    text = "YouTube dentro de Miku",
+                    color = MikuOnSurface,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            DebugActionButton(label = "✕ Cerrar", onClick = onClose)
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Card(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(14.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF041915)),
+            border = BorderStroke(1.5.dp, MikuCyan.copy(alpha = 0.6f)),
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AndroidView(
+                    factory = { webView },
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }
