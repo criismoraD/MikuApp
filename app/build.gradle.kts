@@ -44,11 +44,6 @@ if (!sherpaAarFile.exists()) {
     }
 }
 
-val onnxModelFile = file("src/main/assets/vits-piper-es_MX-claude-high/es_MX-claude-high.onnx")
-if (onnxModelFile.exists()) {
-    onnxModelFile.delete()
-}
-
 secrets {
     propertiesFileName = ".env"
     defaultPropertiesFileName = ".env.example"
@@ -62,8 +57,8 @@ android {
         applicationId = "com.example.mikuapp"
         minSdk = 24
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.5"
+        versionCode = 7
+        versionName = "1.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

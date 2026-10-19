@@ -102,7 +102,17 @@ class MikuTtsEngine(
             val modelDir = File(context.filesDir, MODEL_ASSET_DIR)
             val modelFile = File(modelDir, MODEL_FILE)
             val tokensFile = File(modelDir, TOKENS_FILE)
-            if (!tokensFile.exists()) {
+            val modelOk = modelFile.exists() && modelFile.length() == EXPECTED_MODEL_BYTES
+            if (!tokensFile.exists() || !modelOk) {
+                // Copia local desde assets: si el modelo está mal o falta, se recopía
+                // desde el APK (rápido) antes de intentar descargar de red.
+                if (modelFile.exists() && !modelOk) {
+                    MikuLog.d(
+                        TAG,
+                        "Modelo local incompatible (${modelFile.length()} B != $EXPECTED_MODEL_BYTES); recopiando desde assets",
+                    )
+                    modelFile.delete()
+                }
                 MikuLog.d(TAG, "Copiando datos de voz de assets a ${modelDir.absolutePath}")
                 val copyStart = System.currentTimeMillis()
                 copyAssetDirectory(context.assets, MODEL_ASSET_DIR, modelDir)
