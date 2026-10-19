@@ -145,6 +145,10 @@ window.MikuAgent.openAccessibilitySettings()
   Se incrusta en `BuildConfig`, por lo que **no debe publicarse la APK** con tu
   clave; para distribución usa un proxy propio.
 - Modelo del bucle: `gemini-3.8-flash` (constante `GeminiAgentClient.DEFAULT_MODEL`).
+  Si el modelo principal responde 503/429 por alta demanda, el cliente
+  reintenta automáticamente con `gemini-3-flash-preview`. La conversación de voz
+  de Miku sigue usando `gemini-3.8-live`, que solo funciona por WebSocket
+  (`bidiGenerateContent`) y no por `generateContent`.
 - Todo el control ocurre en el dispositivo; el árbol UI y las capturas se
   envían a la API de Gemini como contexto para la decisión.
 

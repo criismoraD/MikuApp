@@ -76,12 +76,39 @@ class GeminiAgentClient(
 
     /**
      * Envía el estado actual al modelo y devuelve su siguiente decisión.
+     *
+     * Si el modelo principal devuelve 503/429 (alta demanda), reintenta una vez
+     * con [FALLBACK_MODEL]. El historial es independiente del modelo, así que
+     * el cambio es transparente para el bucle.
      */
     suspend fun generate(): Turn = withContext(Dispatchers.IO) {
         if (apiKey.isBlank() || apiKey == "your_api_key_here") {
             throw IOException("GEMINI_API_KEY no configurada")
         }
 
+        val models = listOf(modelName, FALLBACK_MODEL).distinct()
+        var lastError: IOException? = null
+
+        for ((index, model) in models.withIndex()) {
+            try {
+                val json = requestGenerate(model)
+                return@withContext parseTurn(json)
+            } catch (error: IOException) {
+                lastError = error
+                val hasFallback = index < models.lastIndex
+                if (!hasFallback || !isRetryable(error)) throw error
+                MikuLog.d(
+                    TAG,
+                    "Modelo $model no disponible (${error.message}). " +
+                        "Probando $FALLBACK_MODEL...",
+                )
+            }
+        }
+
+        throw lastError ?: IOException("Gemini no devolvió respuesta")
+    }
+
+    private fun requestGenerate(model: String): JSONObject {
         val contentsArray = JSONArray()
         contents.forEach { contentsArray.put(it) }
 
@@ -109,72 +136,81 @@ class GeminiAgentClient(
             )
 
         val request = Request.Builder()
-            .url("$BASE_URL/models/$modelName:generateContent")
+            .url("$BASE_URL/models/$model:generateContent")
             .header("x-goog-api-key", apiKey)
             .header("Content-Type", "application/json")
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
 
-        val response = http.newCall(request).execute()
-        response.use { httpResponse ->
+        http.newCall(request).execute().use { httpResponse ->
             val body = httpResponse.body?.string().orEmpty()
             if (!httpResponse.isSuccessful) {
                 throw IOException(
                     "Gemini HTTP ${httpResponse.code}: ${body.take(500)}",
                 )
             }
-
-            val json = runCatching { JSONObject(body) }.getOrElse {
+            return runCatching { JSONObject(body) }.getOrElse {
                 throw IOException("Respuesta de Gemini no es JSON: ${body.take(300)}")
             }
+        }
+    }
 
-            val candidate = json.optJSONArray("candidates")?.optJSONObject(0)
-                ?: throw IOException(
-                    "Gemini no devolvió candidatos: ${body.take(400)}",
-                )
-            val finishReason = candidate.optString("finishReason")
-            val modelContent = candidate.optJSONObject("content")
-                ?: throw IOException(
-                    "Gemini devolvió contenido vacío (finishReason=$finishReason).",
-                )
+    private fun parseTurn(json: JSONObject): Turn {
+        val candidate = json.optJSONArray("candidates")?.optJSONObject(0)
+            ?: throw IOException(
+                "Gemini no devolvió candidatos: ${json.toString().take(400)}",
+            )
+        val finishReason = candidate.optString("finishReason")
+        val modelContent = candidate.optJSONObject("content")
+            ?: throw IOException(
+                "Gemini devolvió contenido vacío (finishReason=$finishReason).",
+            )
 
-            // Guardamos la respuesta exacta del modelo (incluidos los
-            // functionCall) para que el siguiente turno sea coherente.
-            contents += JSONObject(modelContent.toString()).put("role", "model")
+        // Guardamos la respuesta exacta del modelo (incluidos los
+        // functionCall) para que el siguiente turno sea coherente.
+        contents += JSONObject(modelContent.toString()).put("role", "model")
 
-            val parts = modelContent.optJSONArray("parts") ?: JSONArray()
-            val textBuilder = StringBuilder()
-            val calls = mutableListOf<ToolCall>()
+        val parts = modelContent.optJSONArray("parts") ?: JSONArray()
+        val textBuilder = StringBuilder()
+        val calls = mutableListOf<ToolCall>()
 
-            for (index in 0 until parts.length()) {
-                val part = parts.optJSONObject(index) ?: continue
-                if (part.optBoolean("thought", false)) continue
+        for (index in 0 until parts.length()) {
+            val part = parts.optJSONObject(index) ?: continue
+            if (part.optBoolean("thought", false)) continue
 
-                part.optJSONObject("functionCall")?.let { functionCall ->
-                    val name = functionCall.optString("name")
-                    if (name.isNotBlank()) {
-                        calls += ToolCall(
-                            name = name,
-                            args = functionCall.optJSONObject("args") ?: JSONObject(),
-                        )
-                    }
+            part.optJSONObject("functionCall")?.let { functionCall ->
+                val name = functionCall.optString("name")
+                if (name.isNotBlank()) {
+                    calls += ToolCall(
+                        name = name,
+                        args = functionCall.optJSONObject("args") ?: JSONObject(),
+                    )
                 }
-
-                part.optString("text")
-                    .takeIf { it.isNotBlank() }
-                    ?.let { textBuilder.append(it) }
             }
 
-            MikuLog.d(
-                TAG,
-                "Decisión: calls=${calls.map { it.name }} texto=${textBuilder.length} chars",
-            )
-
-            Turn(
-                text = textBuilder.toString().trim().ifBlank { null },
-                calls = calls,
-            )
+            part.optString("text")
+                .takeIf { it.isNotBlank() }
+                ?.let { textBuilder.append(it) }
         }
+
+        MikuLog.d(
+            TAG,
+            "Decisión: calls=${calls.map { it.name }} texto=${textBuilder.length} chars",
+        )
+
+        return Turn(
+            text = textBuilder.toString().trim().ifBlank { null },
+            calls = calls,
+        )
+    }
+
+    private fun isRetryable(error: IOException): Boolean {
+        val message = error.message.orEmpty()
+        return message.contains("HTTP 503") ||
+            message.contains("HTTP 429") ||
+            message.contains("HTTP 500") ||
+            message.contains("UNAVAILABLE") ||
+            message.contains("high demand")
     }
 
     /**
@@ -336,6 +372,7 @@ class GeminiAgentClient(
 
     companion object {
         const val DEFAULT_MODEL = "gemini-3.8-flash"
+        const val FALLBACK_MODEL = "gemini-3-flash-preview"
 
         private const val TAG = "Artemis"
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
