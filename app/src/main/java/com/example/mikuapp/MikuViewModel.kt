@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mikuapp.audio.AudioRecorder
 import com.example.mikuapp.audio.GeminiAudioPlayer
+import com.example.mikuapp.audio.MikuRuntimeService
 import com.example.mikuapp.commands.AndroidCommandExecutor
 import com.example.mikuapp.expressions.ExpressionDetector
 import com.example.mikuapp.expressions.MikuExpression
@@ -46,28 +47,39 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     private val _notepadTitle = MutableStateFlow("Miku_Notas.txt")
     val notepadTitle: StateFlow<String> = _notepadTitle.asStateFlow()
 
-    private val commandExecutor = AndroidCommandExecutor(application) { action, text ->
-        when (action) {
-            "open" -> {
-                _notepadVisible.value = true
-                if (text.isNotBlank()) {
+    private val commandExecutor = AndroidCommandExecutor(
+        context = application,
+        onNotepadAction = { action, text ->
+            when (action) {
+                "open" -> {
+                    _notepadVisible.value = true
+                    if (text.isNotBlank()) {
+                        _notepadContent.value = text
+                    }
+                }
+                "replace" -> {
+                    _notepadVisible.value = true
                     _notepadContent.value = text
                 }
+                "append" -> {
+                    _notepadVisible.value = true
+                    val current = _notepadContent.value
+                    _notepadContent.value = if (current.isBlank()) text else "$current\n$text"
+                }
+                "close" -> {
+                    _notepadVisible.value = false
+                }
             }
-            "replace" -> {
-                _notepadVisible.value = true
-                _notepadContent.value = text
-            }
-            "append" -> {
-                _notepadVisible.value = true
-                val current = _notepadContent.value
-                _notepadContent.value = if (current.isBlank()) text else "$current\n$text"
-            }
-            "close" -> {
-                _notepadVisible.value = false
-            }
-        }
-    }
+        },
+        onCameraLensRequest = { front ->
+            val cameraOn = _isCameraActive.value
+            _isCameraActive.value = true
+            _cameraLensFront.value = front
+            lastCameraFrameAt = 0L
+            MikuLog.d(TAG, "Cámara ${if (front) "FRONTAL" else "TRASERA"} solicitada${if (cameraOn) " (cambiando lente)" else " (encendiendo cámara)"}")
+            _statusMessage.value = if (front) "Cámara frontal encendida" else "Cámara trasera encendida"
+        },
+    )
 
     private var geminiClient: GeminiLiveClient? = null
     private var audioRecorder: AudioRecorder? = null
@@ -104,6 +116,9 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isCameraActive = MutableStateFlow(false)
     val isCameraActive: StateFlow<Boolean> = _isCameraActive.asStateFlow()
+
+    private val _cameraLensFront = MutableStateFlow(false)
+    val cameraLensFront: StateFlow<Boolean> = _cameraLensFront.asStateFlow()
 
     private val _currentExpression = MutableStateFlow<MikuExpression?>(null)
     val currentExpression: StateFlow<MikuExpression?> = _currentExpression.asStateFlow()
@@ -296,6 +311,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         stateCollectionJob = null
         clearExpression("sesion")
         stopRecorder()
+        MikuRuntimeService.stop(getApplication())
         geminiClient?.disconnect()
         geminiClient = null
         _connectionState.value = GeminiLiveClient.ConnectionState.DISCONNECTED
@@ -376,6 +392,25 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         MikuLog.d(TAG, "Cámara ${if (newValue) "ACTIVADA ( ahora te miro por sus ojos )" else "desactivada"}")
     }
 
+    fun flipCameraLens() {
+        if (!_isCameraActive.value) {
+            _isCameraActive.value = true
+        }
+        _cameraLensFront.value = !_cameraLensFront.value
+        lastCameraFrameAt = 0L
+        MikuLog.d(TAG, "Cámara cambiada a ${if (_cameraLensFront.value) "FRONTAL" else "TRASERA"}")
+    }
+
+    fun setCameraLens(front: Boolean) {
+        if (!front && !_isCameraActive.value) {
+            _isCameraActive.value = true
+        }
+        if (_cameraLensFront.value == front) return
+        _cameraLensFront.value = front
+        lastCameraFrameAt = 0L
+        MikuLog.d(TAG, "Cámara ${if (front) "FRONTAL" else "TRASERA"} activada por ${if (front) "comando de voz" else "Miku"}")
+    }
+
     fun sendCameraFrame(jpeg: ByteArray) {
         if (!_isCameraActive.value) return
         val client = geminiClient ?: return
@@ -424,11 +459,6 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (audioRecorder != null) return
 
-        runCatching {
-            val audioManager = getApplication<Application>().getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
-            audioManager?.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
-        }
-
         val recorder = AudioRecorder(
             onChunk = { pcm, rms -> handleMicrophoneChunk(client, pcm, rms) },
             onError = { error ->
@@ -448,10 +478,6 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         audioRecorder = null
         _isListening.value = false
         consecutiveBargeInChunks = 0
-        runCatching {
-            val audioManager = getApplication<Application>().getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
-            audioManager?.mode = android.media.AudioManager.MODE_NORMAL
-        }
     }
 
     private fun handleMicrophoneChunk(client: GeminiLiveClient, pcm: ByteArray, rms: Float) {
@@ -512,6 +538,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onConnected() {
             MikuLog.d(TAG, "Conectada con Gemini, activando micrófono")
+            MikuRuntimeService.start(getApplication())
             startRecorder()
             pendingPrompt?.let { prompt ->
                 pendingPrompt = null
@@ -525,6 +552,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             pendingPrompt = null
             modelTurnInProgress = false
             stopRecorder()
+            MikuRuntimeService.stop(getApplication())
             geminiAudio.stop()
             if (geminiClient?.connectionState?.value == GeminiLiveClient.ConnectionState.DISCONNECTED) {
                 geminiClient = null
@@ -620,6 +648,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         stateCollectionJob?.cancel()
         stateCollectionJob = null
         stopRecorder()
+        MikuRuntimeService.stop(getApplication())
         geminiClient?.disconnect()
         geminiClient = null
         ttsEngine.release()

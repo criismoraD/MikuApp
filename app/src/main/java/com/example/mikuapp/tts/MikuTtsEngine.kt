@@ -16,6 +16,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
@@ -106,27 +108,62 @@ class MikuTtsEngine(
                 copyAssetDirectory(context.assets, MODEL_ASSET_DIR, modelDir)
                 MikuLog.d(TAG, "Copia terminada en ${System.currentTimeMillis() - copyStart} ms")
             }
-            if (!modelFile.exists() || modelFile.length() < 10_000_000L) {
-                MikuLog.d(TAG, "Descargando modelo ONNX bajo demanda a ${modelFile.absolutePath}...")
+            if (modelFile.exists() && modelFile.length() != EXPECTED_MODEL_BYTES) {
+                MikuLog.d(
+                    TAG,
+                    "Modelo local incompatible (${modelFile.length()} B != $EXPECTED_MODEL_BYTES)" +
+                        "; borrando para volver a descargar",
+                )
+                modelFile.delete()
+            }
+            if (!modelFile.exists()) {
+                MikuLog.d(TAG, "Descargando modelo sherpa-onnx (tarball k2-fsa)...")
                 val dlStart = System.currentTimeMillis()
                 val downloaded = runCatching {
                     modelDir.mkdirs()
-                    val tempFile = File(modelDir, "$MODEL_FILE.tmp")
-                    java.net.URL(MODEL_DOWNLOAD_URL).openStream().use { input ->
-                        tempFile.outputStream().use { output ->
-                            input.copyTo(output)
+                    val tarFile = File(context.cacheDir, "$MODEL_ASSET_DIR.tar.bz2")
+                    val onnxTmp = File(modelDir, "$MODEL_FILE.tmp")
+                    tarFile.delete()
+                    onnxTmp.delete()
+                    val http = java.net.URL(MODEL_DOWNLOAD_URL).openConnection()
+                        as java.net.HttpURLConnection
+                    http.connectTimeout = 20_000
+                    http.readTimeout = 120_000
+                    http.instanceFollowRedirects = true
+                    http.inputStream.use { tarInput ->
+                        tarFile.outputStream().buffered(1 shl 16).use { out ->
+                            tarInput.copyTo(out, 1 shl 20)
                         }
                     }
-                    if (tempFile.length() > 10_000_000L) {
-                        tempFile.renameTo(modelFile)
-                        true
-                    } else {
-                        tempFile.delete()
-                        false
+                    MikuLog.d(TAG, "Tarball bajado: ${tarFile.length()} B; extrayendo $MODEL_FILE...")
+                    BZip2CompressorInputStream(tarFile.inputStream().buffered(1 shl 16)).use { bz ->
+                        TarArchiveInputStream(bz).use { tar ->
+                            var entry = tar.nextEntry
+                            while (entry != null) {
+                                if (entry.name == MODEL_TAR_MEMBER) {
+                                    onnxTmp.outputStream().buffered(1 shl 16).use { out ->
+                                        tar.copyTo(out, 1 shl 20)
+                                    }
+                                    break
+                                }
+                                entry = tar.nextEntry
+                            }
+                        }
                     }
+                    tarFile.delete()
+                    val ok = onnxTmp.length() == EXPECTED_MODEL_BYTES
+                    if (ok) {
+                        onnxTmp.renameTo(modelFile)
+                    } else {
+                        MikuLog.d(TAG, "ONNX extraído inválido: ${onnxTmp.length()} B (esperado $EXPECTED_MODEL_BYTES)")
+                        onnxTmp.delete()
+                    }
+                    ok
+                }.onFailure { t ->
+                    MikuLog.d(TAG, "Descarga/Extracción falló: ${t::class.java.simpleName}: ${t.message}")
                 }.getOrDefault(false)
                 if (downloaded) {
-                    MikuLog.d(TAG, "Modelo ONNX descargado en ${System.currentTimeMillis() - dlStart} ms")
+                    MikuLog.d(TAG, "Modelo ONNX listo en ${System.currentTimeMillis() - dlStart} ms")
                 }
             }
             if (!modelFile.exists()) {
@@ -141,7 +178,7 @@ class MikuTtsEngine(
                 dataDir = File(modelDir, ESPEAK_DATA_DIR).absolutePath,
                 lengthScale = 0.94f,
             )
-            val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+            val threads = 2
             val modelConfig = OfflineTtsModelConfig(
                 vits = vitsConfig,
                 numThreads = threads,
@@ -500,7 +537,7 @@ class MikuTtsEngine(
             AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build(),
                 )
@@ -635,8 +672,10 @@ class MikuTtsEngine(
 
         private const val TAG = "TTS"
         private const val MODEL_FILE = "es_MX-claude-high.onnx"
+        private const val MODEL_TAR_MEMBER = "vits-piper-es_MX-claude-high/es_MX-claude-high.onnx"
         private const val MODEL_DOWNLOAD_URL =
-            "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_MX/claude/high/es_MX-claude-high.onnx?download=true"
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-es_MX-claude-high.tar.bz2"
+        private const val EXPECTED_MODEL_BYTES = 62_949_322L
         private const val TOKENS_FILE = "tokens.txt"
         private const val ESPEAK_DATA_DIR = "espeak-ng-data"
         private const val SPEAKER_ID = 0

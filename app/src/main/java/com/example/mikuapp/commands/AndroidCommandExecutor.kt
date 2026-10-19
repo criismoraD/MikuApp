@@ -12,6 +12,7 @@ import java.net.URLEncoder
 class AndroidCommandExecutor(
     private val context: Context,
     private val onNotepadAction: ((action: String, text: String) -> Unit)? = null,
+    private val onCameraLensRequest: ((front: Boolean) -> Unit)? = null,
 ) {
 
     private data class KnownApp(
@@ -32,10 +33,20 @@ class AndroidCommandExecutor(
             FUNCTION_OPEN_APP -> openApp(args.optString("app_name"))
             FUNCTION_SEARCH_WEB -> searchWeb(args.optString("query"))
             FUNCTION_CLOSE_APP -> returnToMiku()
+            FUNCTION_CAMERA_FRONT -> switchCameraLens(front = true)
+            FUNCTION_CAMERA_BACK -> switchCameraLens(front = false)
             else -> errorResult("Función no soportada: $name")
         }
     } catch (t: Throwable) {
         errorResult(t.message ?: t.javaClass.simpleName)
+    }
+
+    private fun switchCameraLens(front: Boolean): JSONObject {
+        onCameraLensRequest?.invoke(front)
+        return okResult(
+            "camara" to if (front) "frontal" else "trasera",
+            "modo" to if (front) "lente selfie" else "lente principal",
+        )
     }
 
     private fun openYoutube(queryOrUrl: String): JSONObject {
@@ -220,6 +231,8 @@ class AndroidCommandExecutor(
         const val FUNCTION_OPEN_APP = "open_app"
         const val FUNCTION_SEARCH_WEB = "search_web"
         const val FUNCTION_CLOSE_APP = "close_app"
+        const val FUNCTION_CAMERA_FRONT = "camera_front"
+        const val FUNCTION_CAMERA_BACK = "camera_back"
 
         private val KNOWN_APPS = listOf(
             KnownApp("com.google.android.youtube", "https://m.youtube.com", listOf("youtube", "you tube")),

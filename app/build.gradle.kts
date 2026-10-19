@@ -1,4 +1,3 @@
-import java.net.Socket
 import java.net.URI
 import java.util.Base64
 
@@ -16,22 +15,8 @@ if (!keystoreFile.exists() && keystoreBase64File.exists()) {
 }
 
 val webServerFile = rootProject.file("server.mjs")
-if (webServerFile.exists()) {
-    val isListening = runCatching {
-        val s = Socket("127.0.0.1", 3000)
-        s.close()
-        true
-    }.getOrDefault(false)
-    if (!isListening) {
-        runCatching {
-            ProcessBuilder("node", webServerFile.absolutePath)
-                .directory(rootProject.projectDir)
-                .redirectOutput(File("/tmp/miku-web.log"))
-                .redirectErrorStream(true)
-                .start()
-        }
-    }
-}
+// El server web (server.mjs) se lanza manualmente: node server.mjs
+// Arrancarlo aqui rompe el configuration cache de Gradle.
 
 val sherpaAarFile = file("libs/sherpa-onnx-1.13.8.aar")
 if (!sherpaAarFile.exists()) {
@@ -83,7 +68,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 
@@ -125,6 +110,7 @@ android {
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
+    implementation("org.apache.commons:commons-compress:1.27.1")
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

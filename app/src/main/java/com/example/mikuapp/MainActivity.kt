@@ -129,6 +129,7 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
     val caption by viewModel.caption.collectAsStateWithLifecycle()
     val userSpeech by viewModel.userSpeech.collectAsStateWithLifecycle()
     val isCameraActive by viewModel.isCameraActive.collectAsStateWithLifecycle()
+    val isFrontCamera by viewModel.cameraLensFront.collectAsStateWithLifecycle()
     val currentExpression by viewModel.currentExpression.collectAsStateWithLifecycle()
     val isTtsReady by viewModel.isTtsReady.collectAsStateWithLifecycle()
     val isInitializing by viewModel.isInitializing.collectAsStateWithLifecycle()
@@ -280,7 +281,40 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
                     .border(2.dp, MikuCyan.copy(alpha = 0.85f), RoundedCornerShape(18.dp))
                     .background(Color.Black),
             ) {
-                CameraOverlay(onFrame = viewModel::sendCameraFrame)
+                CameraOverlay(
+                    onFrame = viewModel::sendCameraFrame,
+                    isFront = isFrontCamera,
+                    onFlip = viewModel::flipCameraLens,
+                )
+                Text(
+                    text = if (isFrontCamera) "FRONTAL" else "TRASERA",
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0x99031B18))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 6.dp)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xCC031B18))
+                        .clickable { viewModel.flipCameraLens() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "⇄",
+                        color = Color(0xFF39C5BB),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 Row(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
@@ -382,13 +416,23 @@ private fun MikuHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column {
-            Text(
-                text = "Hatsune Miku",
-                color = MikuOnSurface,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.4.sp,
-            )
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = "Hatsune Miku",
+                    color = MikuOnSurface,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                )
+                Text(
+                    text = "V ${BuildConfig.VERSION_NAME}",
+                    color = MikuCyan,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.6.sp,
+                    modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
+                )
+            }
             Spacer(Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -723,6 +767,8 @@ private fun StatusBanner(message: String) {
 @Composable
 private fun CameraOverlay(
     onFrame: (ByteArray) -> Unit,
+    isFront: Boolean,
+    onFlip: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -737,7 +783,7 @@ private fun CameraOverlay(
         modifier = Modifier.fillMaxSize(),
     )
 
-    LaunchedEffect(previewView) {
+    LaunchedEffect(previewView, isFront) {
         try {
             val provider = withContext(Dispatchers.IO) {
                 ProcessCameraProvider.getInstance(context).get()
@@ -755,13 +801,13 @@ private fun CameraOverlay(
             provider.unbindAll()
             provider.bindToLifecycle(
                 lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
+                if (isFront) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA,
                 preview,
                 analysis,
             )
-            MikuLog.d("Camara", "Cámara enlazada: enviando frames de video a Miku")
+            MikuLog.d("Camara", "Cámara ${if (isFront) "frontal" else "trasera"} enlazada: enviando frames de video a Miku")
         } catch (t: Throwable) {
-            MikuLog.d("Camara", "ERROR activando cámara: ${t.message}")
+            MikuLog.d("Camara", "ERROR activando cámara ${if (isFront) "frontal" else "trasera"}: ${t.message}")
         }
     }
 

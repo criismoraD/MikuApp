@@ -16,4 +16,8 @@
 local.properties
 *.log
 *.jks
+.idea/
 *.keystore
+*.keystore.base64
+.env
+app/libs/*.aar
