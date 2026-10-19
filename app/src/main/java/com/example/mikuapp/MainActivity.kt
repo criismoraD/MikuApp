@@ -1,6 +1,9 @@
 package com.example.mikuapp
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -16,9 +19,15 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -30,6 +39,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,6 +53,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -58,8 +71,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -122,6 +138,9 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
     val debugGeminiMode by viewModel.debugGeminiMode.collectAsStateWithLifecycle()
     val useGeminiVoice by viewModel.useGeminiVoice.collectAsStateWithLifecycle()
     val logEntries by viewModel.logEntries.collectAsStateWithLifecycle()
+    val notepadVisible by viewModel.notepadVisible.collectAsStateWithLifecycle()
+    val notepadContent by viewModel.notepadContent.collectAsStateWithLifecycle()
+    val notepadTitle by viewModel.notepadTitle.collectAsStateWithLifecycle()
 
     var debugPanelOpen by remember { mutableStateOf(false) }
 
@@ -156,7 +175,7 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
         if (granted) {
             viewModel.toggleCamera()
         } else {
-            viewModel.showStatus("Sin la cámara no puede ver, causa")
+            viewModel.showStatus("Sin la cámara me ahorro el trauma de verte")
         }
     }
 
@@ -178,7 +197,7 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    listOf(Color(0xFF03100E), Color(0xFF08251F), Color(0xFF03100E)),
+                    listOf(Color(0xFF020B0A), Color(0xFF07221E), Color(0xFF020908)),
                 ),
             ),
     ) {
@@ -186,7 +205,7 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
+                .padding(horizontal = 20.dp, vertical = 14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MikuHeader(
@@ -205,13 +224,14 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
                 expression = currentExpression,
             )
 
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
 
             CaptionPanel(
                 caption = caption,
                 userSpeech = userSpeech,
                 connected = connected,
                 isSpeaking = isSpeaking,
+                amplitude = amplitude,
                 isInitializing = isInitializing,
                 isTtsReady = isTtsReady,
                 ttsError = ttsError,
@@ -254,10 +274,10 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(12.dp)
-                    .size(width = 190.dp, height = 142.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .border(2.dp, MikuCyan.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
+                    .padding(top = 84.dp, end = 20.dp)
+                    .size(width = 176.dp, height = 132.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .border(2.dp, MikuCyan.copy(alpha = 0.85f), RoundedCornerShape(18.dp))
                     .background(Color.Black),
             ) {
                 CameraOverlay(onFrame = viewModel::sendCameraFrame)
@@ -266,22 +286,24 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
                         .align(Alignment.BottomStart)
                         .padding(6.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xCC04211F)),
+                        .background(Color(0xD9031B18)),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(
                         modifier = Modifier
+                            .padding(start = 6.dp)
                             .size(7.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFF5252)),
+                            .background(Color(0xFFFF2A85)),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = "Miku ve esto",
+                        text = "MIKU VISION",
                         color = Color.White,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                     )
                 }
             }
@@ -303,6 +325,16 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
                 onClose = { debugPanelOpen = false },
             )
         }
+
+        if (notepadVisible) {
+            MikuNotepadOverlay(
+                title = notepadTitle,
+                content = notepadContent,
+                onContentChange = viewModel::setNotepadContent,
+                onClear = viewModel::clearNotepad,
+                onClose = viewModel::closeNotepad,
+            )
+        }
     }
 }
 
@@ -317,80 +349,77 @@ private fun MikuHeader(
     val statusColor: Color
     when {
         isInitializing -> {
-            statusText = "CARGANDO VOZ"
+            statusText = "Sincronizando voz"
             statusColor = MikuMuted
         }
 
         connectionState == GeminiLiveClient.ConnectionState.CONNECTED && isSpeaking -> {
-            statusText = "CANTANDO"
-            statusColor = MikuCyan
+            statusText = "Hablando"
+            statusColor = Color(0xFFFF2A85)
         }
 
         connectionState == GeminiLiveClient.ConnectionState.CONNECTED -> {
-            statusText = "EN LÍNEA"
+            statusText = "En línea"
             statusColor = MikuCyan
         }
 
         connectionState == GeminiLiveClient.ConnectionState.CONNECTING -> {
-            statusText = "CONECTANDO"
+            statusText = "Conectando"
             statusColor = Color(0xFFFFC145)
         }
 
         else -> {
-            statusText = "DESCONECTADA"
+            statusText = "Desconectada"
             statusColor = MikuMuted
         }
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column {
             Text(
-                text = "HATSUNE MIKU",
-                color = MikuCyan,
-                fontSize = 22.sp,
+                text = "Hatsune Miku",
+                color = MikuOnSurface,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
+                letterSpacing = 0.4.sp,
             )
-            Text(
-                text = "Asistente vocal en tiempo real",
-                color = MikuMuted,
-                fontSize = 12.sp,
-            )
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(statusColor),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = statusText,
-                color = statusColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MikuSurfaceVariant)
-                    .border(1.dp, MikuCyan.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
-                    .clickable { onDebugClick() },
-            ) {
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(statusColor),
+                )
+                Spacer(Modifier.width(6.dp))
                 Text(
-                    text = "DBG",
-                    color = MikuCyan,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    text = statusText,
+                    color = statusColor,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
                 )
             }
+        }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(MikuSurface.copy(alpha = 0.75f))
+                .border(1.dp, MikuCyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                .clickable { onDebugClick() },
+        ) {
+            Text(
+                text = "Diagnóstico",
+                color = MikuCyanLight,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            )
         }
     }
 }
@@ -403,7 +432,7 @@ private fun MikuAvatar(
     expression: MikuExpression?,
 ) {
     val scale by animateFloatAsState(
-        targetValue = if (isSpeaking) 1f + amplitude * 0.18f else 1f,
+        targetValue = if (isSpeaking) 1f + amplitude * 0.14f else 1f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessLow,
@@ -414,7 +443,7 @@ private fun MikuAvatar(
     val expressionScale = remember { Animatable(1f) }
     LaunchedEffect(expression) {
         if (expression != null) {
-            expressionScale.snapTo(0.72f)
+            expressionScale.snapTo(0.86f)
             expressionScale.animateTo(
                 1f,
                 spring(
@@ -425,35 +454,79 @@ private fun MikuAvatar(
         }
     }
 
+    val transicionRespiracion = rememberInfiniteTransition(label = "Respiracion_Miku")
+    val escalaRespiracionX by transicionRespiracion.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.038f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "Escala_Respiracion_X",
+    )
+    val escalaRespiracionY by transicionRespiracion.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.054f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "Escala_Respiracion_Y",
+    )
+    val desplazamientoRespiracionY by transicionRespiracion.animateFloat(
+        initialValue = 3f,
+        targetValue = -8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "Desplazamiento_Respiracion_Y",
+    )
+
     val glowAlpha by animateFloatAsState(
         targetValue = when {
-            isSpeaking -> 0.3f + amplitude * 0.5f
-            isConnected -> 0.25f
-            else -> 0.08f
+            isSpeaking -> 0.32f + amplitude * 0.45f
+            isConnected -> 0.22f
+            else -> 0.10f
         },
         label = "mikuGlow",
     )
 
     Box(contentAlignment = Alignment.Center) {
-        Canvas(modifier = Modifier.size(300.dp)) {
+        Canvas(modifier = Modifier.size(284.dp)) {
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
                         MikuCyan.copy(alpha = glowAlpha),
+                        Color(0xFFFF2A85).copy(alpha = if (isSpeaking) glowAlpha * 0.35f else 0.03f),
                         Color.Transparent,
                     ),
                     center = center,
                     radius = size.minDimension / 2f,
                 ),
-                radius = size.minDimension / 2f,
+                radius = (size.minDimension / 2f) * escalaRespiracionX,
                 center = center,
+            )
+            drawCircle(
+                color = MikuCyan.copy(alpha = if (isSpeaking) 0.50f else 0.20f),
+                radius = (size.minDimension / 2f) * (0.84f + amplitude * 0.10f),
+                center = center,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8.dp.toPx()),
+            )
+            drawCircle(
+                color = Color(0xFFFF2A85).copy(alpha = if (isSpeaking) 0.42f else 0.10f),
+                radius = (size.minDimension / 2f) * (0.91f + amplitude * 0.12f),
+                center = center,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx()),
             )
         }
 
         Box(
             modifier = Modifier
-                .size(230.dp)
-                .scale(scale * expressionScale.value),
+                .size(220.dp)
+                .scale(scale * expressionScale.value)
+                .clip(CircleShape)
+                .border(2.5.dp, MikuCyan.copy(alpha = 0.88f), CircleShape),
         ) {
             Image(
                 painter = painterResource(
@@ -463,8 +536,11 @@ private fun MikuAvatar(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(CircleShape)
-                    .border(3.dp, MikuCyan.copy(alpha = 0.7f), CircleShape),
+                    .graphicsLayer {
+                        scaleX = escalaRespiracionX
+                        scaleY = escalaRespiracionY
+                        translationY = desplazamientoRespiracionY
+                    },
             )
         }
     }
@@ -476,60 +552,53 @@ private fun CaptionPanel(
     userSpeech: String,
     connected: Boolean,
     isSpeaking: Boolean,
+    amplitude: Float,
     isInitializing: Boolean,
     isTtsReady: Boolean,
     ttsError: String?,
     isListening: Boolean,
 ) {
     val displayText = when {
-        ttsError != null -> ttsError
-        isInitializing -> "Cargando la voz de Miku..."
-        !connected -> "Conecta para hablar con Miku"
+        isInitializing -> "Sincronizando voz de Miku..."
+        !connected && caption.isBlank() -> "Conecta para conversar en tiempo real con Miku."
         caption.isNotBlank() -> caption
-        else -> "Te escucho..."
-    }
-
-    val label = when {
-        ttsError != null -> "ERROR DE VOZ"
-        isInitializing -> "PREPARANDO"
-        isSpeaking -> "MIKU DICE"
-        connected && isListening -> "ESCUCHANDO"
-        connected -> "MICRÓFONO APAGADO"
-        isTtsReady -> "EN ESPERA"
-        else -> "VOZ NO DISPONIBLE"
+        else -> "Habla de una vez, no tengo toda tu corta vida..."
     }
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 110.dp),
-        shape = RoundedCornerShape(20.dp),
-        color = MikuSurface.copy(alpha = 0.92f),
-        border = BorderStroke(1.dp, MikuCyan.copy(alpha = 0.35f)),
+            .heightIn(min = 112.dp),
+        shape = RoundedCornerShape(22.dp),
+        color = MikuSurface.copy(alpha = 0.90f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isSpeaking) MikuCyan.copy(alpha = 0.75f) else MikuCyan.copy(alpha = 0.24f),
+        ),
     ) {
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-            Text(
-                text = label,
-                color = if (ttsError != null) Color(0xFFFF8A80) else MikuCyan.copy(alpha = 0.85f),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp,
-            )
-            Spacer(Modifier.height(8.dp))
             if (userSpeech.isNotBlank()) {
                 Text(
-                    text = "VOS: $userSpeech",
+                    text = "Tú: $userSpeech",
                     color = MikuMuted,
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                 )
                 Spacer(Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(MikuCyan.copy(alpha = 0.14f)),
+                )
+                Spacer(Modifier.height(10.dp))
             }
             Text(
                 text = displayText,
                 color = MikuOnSurface,
-                fontSize = 17.sp,
-                lineHeight = 24.sp,
+                fontSize = 16.5.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 23.sp,
                 textAlign = TextAlign.Start,
             )
         }
@@ -546,32 +615,41 @@ private fun ControlPanel(
     onMicClick: () -> Unit,
     onCameraClick: () -> Unit,
 ) {
-    Row(
+    Surface(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically,
+        shape = RoundedCornerShape(24.dp),
+        color = MikuSurface.copy(alpha = 0.72f),
+        border = BorderStroke(1.dp, MikuCyan.copy(alpha = 0.20f)),
     ) {
-        CircleControl(
-            glyph = if (connected) "■" else "▶",
-            label = if (connected) "Desconectar" else "Conectar",
-            active = connected,
-            enabled = connected || canConnect,
-            onClick = onConnectClick,
-        )
-        CircleControl(
-            glyph = if (isListening) "●" else "○",
-            label = if (isListening) "Micrófono activo" else "Micrófono apagado",
-            active = isListening,
-            enabled = connected,
-            onClick = onMicClick,
-        )
-        CircleControl(
-            glyph = "◉",
-            label = if (isCameraActive) "Cámara activa" else "Cámara apagada",
-            active = isCameraActive,
-            enabled = connected,
-            onClick = onCameraClick,
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp, horizontal = 12.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CircleControl(
+                glyph = if (connected) "■" else "▶",
+                label = if (connected) "Cortar" else "Conectar",
+                active = connected,
+                enabled = connected || canConnect,
+                onClick = onConnectClick,
+            )
+            CircleControl(
+                glyph = if (isListening) "●" else "○",
+                label = "Micrófono",
+                active = isListening,
+                enabled = connected,
+                onClick = onMicClick,
+            )
+            CircleControl(
+                glyph = "◉",
+                label = "Cámara",
+                active = isCameraActive,
+                enabled = connected,
+                onClick = onCameraClick,
+            )
+        }
     }
 }
 
@@ -589,20 +667,20 @@ private fun CircleControl(
         else -> MikuSurfaceVariant
     }
     val glyphColor = when {
-        !enabled -> MikuMuted.copy(alpha = 0.5f)
-        active -> Color(0xFF04211F)
+        !enabled -> MikuMuted.copy(alpha = 0.45f)
+        active -> Color(0xFF031815)
         else -> MikuCyanLight
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(72.dp)
+                .size(68.dp)
                 .clip(CircleShape)
                 .background(background)
                 .border(
-                    width = 1.dp,
-                    color = MikuCyan.copy(alpha = if (enabled) 0.6f else 0.15f),
+                    width = if (active) 2.dp else 1.dp,
+                    color = if (active) MikuCyanLight else MikuCyan.copy(alpha = if (enabled) 0.55f else 0.15f),
                     shape = CircleShape,
                 )
                 .clickable(enabled = enabled) { onClick() },
@@ -611,15 +689,16 @@ private fun CircleControl(
             Text(
                 text = glyph,
                 color = glyphColor,
-                fontSize = 24.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
             )
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Text(
             text = label,
             color = if (enabled) MikuOnSurface else MikuMuted,
-            fontSize = 12.sp,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.Medium,
         )
     }
 }
@@ -917,5 +996,138 @@ private fun shareLog(context: android.content.Context, onError: (String) -> Unit
         context.startActivity(Intent.createChooser(intent, "Compartir log de Miku"))
     }.onFailure { error ->
         onError(error.message ?: "No se pudo compartir el log")
+    }
+}
+
+@Composable
+private fun MikuNotepadOverlay(
+    title: String,
+    content: String,
+    onContentChange: (String) -> Unit,
+    onClear: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xCC010807))
+            .systemBarsPadding()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.75f),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF041915)),
+            border = BorderStroke(1.5.dp, MikuCyan.copy(alpha = 0.6f)),
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Barra de título retro
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF092923))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(text = "📄", fontSize = 16.sp)
+                        Text(
+                            text = title,
+                            color = MikuOnSurface,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DebugActionButton(
+                            label = "Copiar",
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                val clip = ClipData.newPlainText("Miku Notas", content)
+                                clipboard?.setPrimaryClip(clip)
+                            },
+                        )
+                        DebugActionButton(label = "Limpiar", onClick = onClear)
+                        DebugActionButton(label = "✕", onClick = onClose)
+                    }
+                }
+
+                // Menú simulado
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF061E1A))
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    listOf("Archivo", "Edición", "Formato", "Ver", "Ayuda").forEach { item ->
+                        Text(
+                            text = item,
+                            color = MikuMuted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+
+                // Área de texto
+                BasicTextField(
+                    value = content,
+                    onValueChange = onContentChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .background(Color(0xFF031210))
+                        .padding(14.dp),
+                    textStyle = TextStyle(
+                        color = MikuOnSurface,
+                        fontSize = 13.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                        lineHeight = 19.sp,
+                    ),
+                    cursorBrush = SolidColor(MikuCyan),
+                    decorationBox = { innerTextField ->
+                        if (content.isEmpty()) {
+                            Text(
+                                text = "El Bloc de Notas de Miku está listo...\nPídele a Miku que redacte algo o escribe aquí directamente.",
+                                color = MikuMuted.copy(alpha = 0.5f),
+                                fontSize = 13.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                        innerTextField()
+                    },
+                )
+
+                // Barra de estado
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF061E1A))
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "${content.length} caracteres | ${content.lines().size} líneas",
+                        color = MikuMuted,
+                        fontSize = 10.5.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        text = "Redactado por Hatsune Miku",
+                        color = MikuCyan,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
     }
 }

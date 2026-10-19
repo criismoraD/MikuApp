@@ -128,14 +128,19 @@ class AudioRecorder(
     }
 
     private fun enableEchoCancellation(sessionId: Int) {
-        if (!AcousticEchoCanceler.isAvailable()) {
+        if (AcousticEchoCanceler.isAvailable()) {
+            echoCanceler = runCatching {
+                AcousticEchoCanceler.create(sessionId)?.apply { setEnabled(true) }
+            }.getOrNull()
+            MikuLog.d(TAG, "Cancelador de eco ${if (echoCanceler != null) "activo" else "no creado"}")
+        } else {
             MikuLog.d(TAG, "Cancelador de eco no disponible en este dispositivo")
-            return
         }
-        echoCanceler = runCatching {
-            AcousticEchoCanceler.create(sessionId)?.apply { setEnabled(true) }
-        }.getOrNull()
-        MikuLog.d(TAG, "Cancelador de eco ${if (echoCanceler != null) "activo" else "no creado"}")
+        runCatching {
+            if (android.media.audiofx.NoiseSuppressor.isAvailable()) {
+                android.media.audiofx.NoiseSuppressor.create(sessionId)?.setEnabled(true)
+            }
+        }
     }
 
     private fun releaseRecord() {

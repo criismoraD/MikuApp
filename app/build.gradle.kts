@@ -1,52 +1,107 @@
-import java.util.Properties
+import java.net.Socket
+import java.net.URI
+import java.util.Base64
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.secrets)
 }
 
-val localProperties = Properties().apply {
-    val localFile = rootProject.file("local.properties")
-    if (localFile.exists()) {
-        localFile.inputStream().use { load(it) }
+val keystoreFile = rootProject.file("debug.keystore")
+val keystoreBase64File = rootProject.file("debug.keystore.base64")
+if (!keystoreFile.exists() && keystoreBase64File.exists()) {
+    val decoded = Base64.getMimeDecoder().decode(keystoreBase64File.readText())
+    keystoreFile.writeBytes(decoded)
+}
+
+val webServerFile = rootProject.file("server.mjs")
+if (webServerFile.exists()) {
+    val isListening = runCatching {
+        val s = Socket("127.0.0.1", 3000)
+        s.close()
+        true
+    }.getOrDefault(false)
+    if (!isListening) {
+        runCatching {
+            ProcessBuilder("node", webServerFile.absolutePath)
+                .directory(rootProject.projectDir)
+                .redirectOutput(File("/tmp/miku-web.log"))
+                .redirectErrorStream(true)
+                .start()
+        }
     }
 }
 
-val geminiApiKey: String = (localProperties.getProperty("GEMINI_API_KEY")
-    ?: (project.findProperty("GEMINI_API_KEY") as String?)
-    ?: System.getenv("GEMINI_API_KEY")
-    ?: "")
-    .replace("\\", "\\\\")
-    .replace("\"", "\\\"")
+val sherpaAarFile = file("libs/sherpa-onnx-1.13.8.aar")
+if (!sherpaAarFile.exists()) {
+    sherpaAarFile.parentFile.mkdirs()
+    val aarUrls = listOf(
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar",
+        "https://sourceforge.net/projects/sherpa-onnx/files/v1.13.8/sherpa-onnx-1.13.8.aar/download"
+    )
+    for (url in aarUrls) {
+        try {
+            println("Descargando sherpa-onnx-1.13.8.aar desde $url ...")
+            URI(url).toURL().openStream().use { input ->
+                sherpaAarFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            if (sherpaAarFile.exists() && sherpaAarFile.length() > 100_000) {
+                println("sherpa-onnx-1.13.8.aar descargado correctamente (${sherpaAarFile.length()} bytes)")
+                break
+            }
+        } catch (e: Exception) {
+            println("Aviso: fallo descargando AAR desde $url: ${e.message}")
+            sherpaAarFile.delete()
+        }
+    }
+}
+
+val onnxModelFile = file("src/main/assets/vits-piper-es_MX-claude-high/es_MX-claude-high.onnx")
+if (onnxModelFile.exists()) {
+    onnxModelFile.delete()
+}
+
+secrets {
+    propertiesFileName = ".env"
+    defaultPropertiesFileName = ".env.example"
+}
 
 android {
     namespace = "com.example.mikuapp"
-    compileSdk {
-        version = release(37)
-    }
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.mikuapp"
         minSdk = 24
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
     }
 
+    signingConfigs {
+        create("debugConfig") {
+            storeFile = file("${rootDir}/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debugConfig")
+        }
         release {
-            optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
-            }
+            isMinifyEnabled = false
         }
     }
     compileOptions {

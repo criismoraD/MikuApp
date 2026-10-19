@@ -17,6 +17,13 @@ class SentenceBuffer {
     private val _partialText = MutableStateFlow("")
     val partialText: StateFlow<String> = _partialText.asStateFlow()
 
+    private val _queuedCount = MutableStateFlow(0)
+    val queuedCount: StateFlow<Int> = _queuedCount.asStateFlow()
+
+    fun onSentenceConsumed() {
+        _queuedCount.value = (_queuedCount.value - 1).coerceAtLeast(0)
+    }
+
     fun append(chunk: String) {
         if (chunk.isEmpty()) return
         pending.append(chunk)
@@ -34,6 +41,7 @@ class SentenceBuffer {
         _partialText.value = ""
         if (sentence.isNotEmpty()) {
             MikuLog.d(TAG, "Enviada al TTS (flush): \"$sentence\"")
+            _queuedCount.value += 1
             sentences.trySend(sentence)
             onSentence?.invoke(sentence)
         }
@@ -49,6 +57,7 @@ class SentenceBuffer {
         while (sentences.tryReceive().isSuccess) {
             dropped++
         }
+        _queuedCount.value = 0
         if (dropped > 0) {
             MikuLog.d(TAG, "Frases en cola descartadas: $dropped")
         }
@@ -67,6 +76,7 @@ class SentenceBuffer {
             val sentence = clean(raw)
             if (sentence.isNotEmpty()) {
                 MikuLog.d(TAG, "Enviada al TTS: \"$sentence\"")
+                _queuedCount.value += 1
                 sentences.trySend(sentence)
                 onSentence?.invoke(sentence)
             }

@@ -9,7 +9,10 @@ import android.os.Build
 import org.json.JSONObject
 import java.net.URLEncoder
 
-class AndroidCommandExecutor(private val context: Context) {
+class AndroidCommandExecutor(
+    private val context: Context,
+    private val onNotepadAction: ((action: String, text: String) -> Unit)? = null,
+) {
 
     private data class KnownApp(
         val packageName: String,
@@ -19,14 +22,76 @@ class AndroidCommandExecutor(private val context: Context) {
 
     fun execute(name: String, args: JSONObject): JSONObject = try {
         when (name) {
+            FUNCTION_OPEN_YOUTUBE -> openYoutube(args.optString("query_or_url"))
+            FUNCTION_PLAY_YOUTUBE_VIDEO -> playYoutubeVideo(args.optString("video_query"))
+            FUNCTION_CLOSE_YOUTUBE -> returnToMiku()
+            FUNCTION_OPEN_NOTEPAD -> openNotepad(args.optString("initial_text"))
+            FUNCTION_WRITE_NOTEPAD -> writeNotepad(args.optString("text"), args.optString("mode"))
+            FUNCTION_CLOSE_NOTEPAD -> closeNotepad()
             FUNCTION_OPEN_URL -> openUrl(args.optString("url"))
             FUNCTION_OPEN_APP -> openApp(args.optString("app_name"))
             FUNCTION_SEARCH_WEB -> searchWeb(args.optString("query"))
-            FUNCTION_CLOSE_APP -> goHome()
+            FUNCTION_CLOSE_APP -> returnToMiku()
             else -> errorResult("Función no soportada: $name")
         }
     } catch (t: Throwable) {
         errorResult(t.message ?: t.javaClass.simpleName)
+    }
+
+    private fun openYoutube(queryOrUrl: String): JSONObject {
+        val trimmed = queryOrUrl.trim()
+        if (trimmed.isNotBlank()) {
+            return playYoutubeVideo(trimmed)
+        }
+        return openApp("youtube")
+    }
+
+    private fun playYoutubeVideo(videoQuery: String): JSONObject {
+        val query = videoQuery.trim()
+        val url = if (query.startsWith("http://") || query.startsWith("https://")) {
+            query
+        } else {
+            "https://www.youtube.com/results?search_query=${urlEncode(query)}"
+        }
+        val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            setPackage("com.google.android.youtube")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        if (safeStart(appIntent)) {
+            return okResult("youtube" to query, "modo" to "app_nativa")
+        }
+        return if (launchUrl(url)) {
+            okResult("youtube" to query, "modo" to "navegador")
+        } else {
+            errorResult("No se pudo abrir el video en YouTube")
+        }
+    }
+
+    private fun openNotepad(initialText: String): JSONObject {
+        onNotepadAction?.invoke("open", initialText)
+        return okResult("notepad" to "abierto", "texto" to initialText)
+    }
+
+    private fun writeNotepad(text: String, mode: String): JSONObject {
+        if (text.isBlank()) return errorResult("Texto vacío para escribir")
+        val effectiveMode = if (mode.equals("replace", ignoreCase = true)) "replace" else "append"
+        onNotepadAction?.invoke(effectiveMode, text)
+        return okResult("notepad" to "redactado", "texto" to text, "modo" to effectiveMode)
+    }
+
+    private fun closeNotepad(): JSONObject {
+        onNotepadAction?.invoke("close", "")
+        return okResult("notepad" to "cerrado")
+    }
+
+    private fun returnToMiku(): JSONObject {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        if (intent != null && safeStart(intent)) {
+            return okResult("app" to "miku", "modo" to "regreso al frente")
+        }
+        return goHome()
     }
 
     private fun goHome(): JSONObject {
@@ -145,6 +210,12 @@ class AndroidCommandExecutor(private val context: Context) {
         .put("message", message)
 
     companion object {
+        const val FUNCTION_OPEN_YOUTUBE = "open_youtube"
+        const val FUNCTION_PLAY_YOUTUBE_VIDEO = "play_youtube_video"
+        const val FUNCTION_CLOSE_YOUTUBE = "close_youtube"
+        const val FUNCTION_OPEN_NOTEPAD = "open_notepad"
+        const val FUNCTION_WRITE_NOTEPAD = "write_notepad"
+        const val FUNCTION_CLOSE_NOTEPAD = "close_notepad"
         const val FUNCTION_OPEN_URL = "open_url"
         const val FUNCTION_OPEN_APP = "open_app"
         const val FUNCTION_SEARCH_WEB = "search_web"

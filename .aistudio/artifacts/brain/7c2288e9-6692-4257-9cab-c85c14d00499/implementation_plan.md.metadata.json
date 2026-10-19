@@ -1,0 +1,6 @@
+{
+  "summary": "Plan de migración y corrección de compilación de MikuApp en AI Studio Android: alineación de versiones de Gradle/AGP/SDK, integración de Secrets Gradle Plugin con .env/.env.example, configuración de debug.keystore y descarga automática de sherpa-onnx AAR y modelo TTS en Gradle.",
+  "updatedAt": "2026-10-18T21:48:16.946493446Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

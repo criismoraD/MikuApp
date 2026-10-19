@@ -1,0 +1,11 @@
+{
+  "name": "Hatsune Miku — Asistente Vocal en Tiempo Real",
+  "description": "Asistente vocal interactivo en tiempo real con Hatsune Miku en Android, impulsado por Gemini Live API, visión por cámara CameraX y síntesis de voz local Vocaloid.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

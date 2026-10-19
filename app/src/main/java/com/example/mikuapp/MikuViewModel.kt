@@ -30,9 +30,44 @@ import kotlin.random.Random
 class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     private val sentenceBuffer = SentenceBuffer()
-    private val ttsEngine = MikuTtsEngine(application, sentenceBuffer.sentences)
+    private val ttsEngine = MikuTtsEngine(
+        context = application,
+        sentences = sentenceBuffer.sentences,
+        onSentenceConsumed = sentenceBuffer::onSentenceConsumed,
+    )
     private val geminiAudio = GeminiAudioPlayer()
-    private val commandExecutor = AndroidCommandExecutor(application)
+
+    private val _notepadVisible = MutableStateFlow(false)
+    val notepadVisible: StateFlow<Boolean> = _notepadVisible.asStateFlow()
+
+    private val _notepadContent = MutableStateFlow("")
+    val notepadContent: StateFlow<String> = _notepadContent.asStateFlow()
+
+    private val _notepadTitle = MutableStateFlow("Miku_Notas.txt")
+    val notepadTitle: StateFlow<String> = _notepadTitle.asStateFlow()
+
+    private val commandExecutor = AndroidCommandExecutor(application) { action, text ->
+        when (action) {
+            "open" -> {
+                _notepadVisible.value = true
+                if (text.isNotBlank()) {
+                    _notepadContent.value = text
+                }
+            }
+            "replace" -> {
+                _notepadVisible.value = true
+                _notepadContent.value = text
+            }
+            "append" -> {
+                _notepadVisible.value = true
+                val current = _notepadContent.value
+                _notepadContent.value = if (current.isBlank()) text else "$current\n$text"
+            }
+            "close" -> {
+                _notepadVisible.value = false
+            }
+        }
+    }
 
     private var geminiClient: GeminiLiveClient? = null
     private var audioRecorder: AudioRecorder? = null
@@ -42,6 +77,12 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     private var lastApiKey = ""
     private var pendingPrompt: String? = null
     private var userTurnActive = false
+
+    @Volatile
+    private var modelTurnInProgress = false
+
+    @Volatile
+    private var gataSongRequestedInTurn = false
 
     private val _connectionState = MutableStateFlow(GeminiLiveClient.ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<GeminiLiveClient.ConnectionState> = _connectionState.asStateFlow()
@@ -71,6 +112,9 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastCameraFrameAt = 0L
 
+    @Volatile
+    private var lastSpeechEndedAt = 0L
+
     private val responseBuilder = StringBuilder()
 
     private val _responseText = MutableStateFlow("")
@@ -86,8 +130,11 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     val isSpeaking: StateFlow<Boolean> = combine(
         ttsEngine.isSpeaking,
         geminiAudio.isPlaying,
-    ) { local, remote -> local || remote }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        sentenceBuffer.queuedCount,
+        _debugGeminiMode,
+    ) { local, remote, queued, silent ->
+        local || remote || (queued > 0 && !silent)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     val audioAmplitude: StateFlow<Float> = combine(
         ttsEngine.audioAmplitude,
@@ -116,10 +163,54 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     init {
         updateVoiceRouting()
         sentenceBuffer.onSentence = { sentence -> handleMikuSentence(sentence) }
+        viewModelScope.launch {
+            var wasSpeaking = false
+            isSpeaking.collect { speaking ->
+                if (!wasSpeaking && speaking) {
+                    // Enviar frame de silencio para cerrar limpiamente el turno de voz del usuario en el VAD de Gemini
+                    geminiClient?.sendAudioChunk(SILENT_PCM_CHUNK)
+                } else if (wasSpeaking && !speaking) {
+                    lastSpeechEndedAt = System.currentTimeMillis()
+                }
+                wasSpeaking = speaking
+            }
+        }
     }
 
     private fun handleMikuSentence(sentence: String) {
-        ExpressionDetector.detect(sentence)?.let { showExpression(it, "frase") }
+        if (sentence.contains("[CANTAR_GATA]", ignoreCase = true) && gataSongRequestedInTurn) {
+            showExpression(MikuExpression.ENAMORADA, "cancion")
+        } else {
+            ExpressionDetector.detect(sentence, fallbackWhenSpeaking = true)?.let { showExpression(it, "frase") }
+        }
+    }
+
+    private fun Es_Comando_Detener_Cancion(raw: String): Boolean {
+        val norm = raw.lowercase()
+            .replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+        return Regex("\\b(callate|calla|para|parar|deten|detente|basta|silencio|corta|apaga|stop|suficiente)\\b").containsMatchIn(norm) ||
+            norm.contains("para la musica") ||
+            norm.contains("deja de cantar") ||
+            norm.contains("no cantes") ||
+            norm.contains("ya callate")
+    }
+
+    fun Detener_Cancion_Voz(motivo: String = "voz") {
+        if (!ttsEngine.isSongPlaying && !gataSongRequestedInTurn) return
+        gataSongRequestedInTurn = false
+        ttsEngine.Detener_Cancion_Voz()
+        lastSpeechEndedAt = 0L
+        showExpression(MikuExpression.ENOJADA, "corte-cancion")
+        MikuLog.d(TAG, "Detener_Cancion_Voz ejecutado ($motivo)")
+    }
+
+    private fun esSolicitudCantoUsuario(raw: String): Boolean {
+        val norm = raw.lowercase()
+            .replace('á', 'a').replace('é', 'e').replace('í', 'i').replace('ó', 'o').replace('ú', 'u')
+        if (Es_Comando_Detener_Cancion(norm)) return false
+        return Regex("\\b(canta|cantar|cantame|cantate|cancion)\\b").containsMatchIn(norm) ||
+            norm.contains("gata bajo la lluvia") ||
+            norm.contains("maullare por ti")
     }
 
     private fun showExpression(expression: MikuExpression, source: String) {
@@ -158,9 +249,10 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             MikuLog.d(TAG, "Cargando modelo de voz local...")
             val ready = ttsEngine.initialize()
             if (!ready) {
-                MikuLog.d(TAG, "Modelo de voz NO disponible: ${ttsEngine.error.value}")
-                _statusMessage.value = ttsEngine.error.value
-                    ?: "No se pudo cargar el modelo de voz local"
+                MikuLog.d(TAG, "Modelo de voz NO disponible (${ttsEngine.error.value}), activando voz nativa de Gemini")
+                _useGeminiVoice.value = true
+                updateVoiceRouting()
+                _statusMessage.value = "Usando voz de Gemini (modelo local no disponible)"
             }
             sentenceBuffer.reset()
             ttsEngine.start()
@@ -170,9 +262,9 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connect(apiKey: String) {
         if (geminiClient != null) return
-        if (apiKey.isBlank()) {
-            MikuLog.d(TAG, "ERROR: GEMINI_API_KEY vacía")
-            _statusMessage.value = "Falta la GEMINI_API_KEY en local.properties"
+        if (apiKey.isBlank() || apiKey == "your_api_key_here") {
+            MikuLog.d(TAG, "ERROR: GEMINI_API_KEY vacía o no configurada")
+            _statusMessage.value = "Configura GEMINI_API_KEY en el archivo .env"
             return
         }
         lastApiKey = apiKey
@@ -265,6 +357,18 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         geminiAudio.setPlaybackEnabled(!silent && nativeVoice)
     }
 
+    fun setNotepadContent(content: String) {
+        _notepadContent.value = content
+    }
+
+    fun closeNotepad() {
+        _notepadVisible.value = false
+    }
+
+    fun clearNotepad() {
+        _notepadContent.value = ""
+    }
+
     fun toggleCamera() {
         val newValue = !_isCameraActive.value
         _isCameraActive.value = newValue
@@ -320,6 +424,11 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (audioRecorder != null) return
 
+        runCatching {
+            val audioManager = getApplication<Application>().getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+            audioManager?.mode = android.media.AudioManager.MODE_IN_COMMUNICATION
+        }
+
         val recorder = AudioRecorder(
             onChunk = { pcm, rms -> handleMicrophoneChunk(client, pcm, rms) },
             onError = { error ->
@@ -339,19 +448,48 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         audioRecorder = null
         _isListening.value = false
         consecutiveBargeInChunks = 0
+        runCatching {
+            val audioManager = getApplication<Application>().getSystemService(android.content.Context.AUDIO_SERVICE) as? android.media.AudioManager
+            audioManager?.mode = android.media.AudioManager.MODE_NORMAL
+        }
     }
 
     private fun handleMicrophoneChunk(client: GeminiLiveClient, pcm: ByteArray, rms: Float) {
         if (client != geminiClient) return
 
-        if (ttsEngine.isSpeaking.value) {
+        val now = System.currentTimeMillis()
+        if (ttsEngine.isSongPlaying) {
+            if (rms >= 0.22f) {
+                consecutiveBargeInChunks++
+                if (consecutiveBargeInChunks >= 4) {
+                    consecutiveBargeInChunks = 0
+                    Detener_Cancion_Voz("barge-in")
+                }
+            } else {
+                consecutiveBargeInChunks = 0
+            }
+            client.sendAudioChunk(pcm)
+            return
+        }
+
+        val currentlySpeaking =
+            isSpeaking.value ||
+                modelTurnInProgress ||
+                sentenceBuffer.partialText.value.isNotBlank() ||
+                sentenceBuffer.queuedCount.value > 0
+        val inEchoTail = (now - lastSpeechEndedAt) < ECHO_TAIL_COOLDOWN_MS
+
+        if (currentlySpeaking || inEchoTail) {
             if (rms >= BARGE_IN_RMS_THRESHOLD) {
                 consecutiveBargeInChunks++
                 if (consecutiveBargeInChunks >= BARGE_IN_CHUNKS_REQUIRED) {
                     consecutiveBargeInChunks = 0
-                    MikuLog.d(TAG, "Barge-in detectado (RMS=%.3f): cortando voz".format(rms))
+                    MikuLog.d(TAG, "Barge-in real detectado (RMS=%.3f): cortando voz".format(rms))
+                    modelTurnInProgress = false
                     ttsEngine.stopSpeaking()
+                    geminiAudio.stop()
                     sentenceBuffer.reset()
+                    lastSpeechEndedAt = 0L
                     client.sendAudioChunk(pcm)
                 }
             } else {
@@ -385,6 +523,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         override fun onDisconnected(reason: String?) {
             MikuLog.d(TAG, "Desconectada de Gemini (${reason ?: "sin motivo"})")
             pendingPrompt = null
+            modelTurnInProgress = false
             stopRecorder()
             geminiAudio.stop()
             if (geminiClient?.connectionState?.value == GeminiLiveClient.ConnectionState.DISCONNECTED) {
@@ -398,38 +537,72 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onTextChunk(text: String) {
-            userTurnActive = false
-            sentenceBuffer.append(text)
-            responseBuilder.append(text)
-            _responseText.value = responseBuilder.toString()
+            modelTurnInProgress = true
+            if (userTurnActive) {
+                responseBuilder.setLength(0)
+                userTurnActive = false
+            }
+            val cleanedForDisplay = text.replace(Regex("\\[CANTAR_GATA\\]", RegexOption.IGNORE_CASE), "")
+            sentenceBuffer.append(cleanedForDisplay)
+            responseBuilder.append(cleanedForDisplay)
+            _responseText.value = responseBuilder.toString().trim()
         }
 
         override fun onInputTranscription(text: String) {
+            if ((isSpeaking.value && !ttsEngine.isSongPlaying) || modelTurnInProgress) return
             if (!userTurnActive) {
                 userSpeechBuilder.setLength(0)
+                gataSongRequestedInTurn = false
                 userTurnActive = true
             }
             userSpeechBuilder.append(text)
             val userText = userSpeechBuilder.toString().trim()
             _userSpeech.value = userText
-            ExpressionDetector.detect(userText)?.let { showExpression(it, "usuario") }
+            if (Es_Comando_Detener_Cancion(userText) || ttsEngine.isSongPlaying) {
+                Detener_Cancion_Voz(userText)
+            } else if (esSolicitudCantoUsuario(userText)) {
+                gataSongRequestedInTurn = true
+                showExpression(MikuExpression.ENAMORADA, "usuario-cancion")
+            } else {
+                ExpressionDetector.detect(userText)?.let { showExpression(it, "usuario") }
+            }
         }
 
         override fun onAudioChunk(pcm16: ByteArray, sampleRate: Int) {
+            modelTurnInProgress = true
             geminiAudio.play(pcm16, sampleRate)
         }
 
         override fun onTurnComplete() {
             sentenceBuffer.flush()
             geminiAudio.turnComplete()
+            modelTurnInProgress = false
+            if (gataSongRequestedInTurn) {
+                gataSongRequestedInTurn = false
+                showExpression(MikuExpression.ENAMORADA, "cancion")
+                ttsEngine.requestGataSong()
+            }
+            if (!isSpeaking.value && sentenceBuffer.queuedCount.value == 0) {
+                lastSpeechEndedAt = System.currentTimeMillis()
+            }
         }
 
         override fun onInterrupted() {
+            if (ttsEngine.isSongPlaying) {
+                Detener_Cancion_Voz("interrupcion-remota")
+                return
+            }
+            if (isSpeaking.value && !_useGeminiVoice.value && consecutiveBargeInChunks == 0) {
+                MikuLog.d(TAG, "Interrupción remota ignorada (protección anti-eco mientras Miku habla)")
+                return
+            }
             MikuLog.d(TAG, "Interrupción: descartando frases pendientes")
+            modelTurnInProgress = false
             clearExpression("interrumpida")
             sentenceBuffer.reset()
             ttsEngine.stopSpeaking()
             geminiAudio.stop()
+            lastSpeechEndedAt = 0L
         }
 
         override fun onFunctionCall(call: GeminiLiveClient.FunctionCall) {
@@ -461,9 +634,11 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         private const val CAMERA_FRAME_MIN_INTERVAL_MS = 900L
         private const val GEMINI_TEST_PROMPT =
             "Hola Miku. Preséntate en una frase corta y cantarina para probar tu voz."
-        private const val BARGE_IN_RMS_THRESHOLD = 0.09f
-        private const val BARGE_IN_CHUNKS_REQUIRED = 3
+        private const val BARGE_IN_RMS_THRESHOLD = 0.45f
+        private const val BARGE_IN_CHUNKS_REQUIRED = 8
+        private const val ECHO_TAIL_COOLDOWN_MS = 1100L
         private const val EXPRESSION_MIN_MS = 5000L
         private const val EXPRESSION_MAX_MS = 8000L
+        private val SILENT_PCM_CHUNK = ByteArray(3200)
     }
 }
