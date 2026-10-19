@@ -26,6 +26,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLDecoder
+import java.net.URLEncoder
 import kotlin.random.Random
 
 class MikuViewModel(application: Application) : AndroidViewModel(application) {
@@ -52,6 +56,104 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
     fun closeYoutubeWindow() {
         _youtubeUrl.value = null
+        _statusMessage.value = "Ventana de YouTube cerrada"
+    }
+
+    private var youtubeSearchQuery: String? = null
+
+    private fun openYoutubeWindow(payload: String) {
+        when {
+            payload.startsWith("http://") || payload.startsWith("https://") -> {
+                youtubeSearchQuery = null
+                _youtubeUrl.value = payload
+                _statusMessage.value = "YouTube abierto dentro de Miku"
+            }
+            payload.isNotBlank() -> {
+                youtubeSearchQuery = payload
+                _youtubeUrl.value =
+                    "https://m.youtube.com/results?search_query=${URLEncoder.encode(payload, "UTF-8")}"
+                _statusMessage.value = "Buscando \"$payload\" en la ventana de YouTube"
+            }
+            else -> {
+                youtubeSearchQuery = null
+                _youtubeUrl.value = "https://m.youtube.com"
+                _statusMessage.value = "YouTube abierto dentro de Miku"
+            }
+        }
+        MikuLog.d(TAG, "Ventana interna de YouTube: ${_youtubeUrl.value}")
+    }
+
+    private fun handleWindowCommands(userText: String): Boolean {
+        val t = userText.lowercase()
+        val closeVerb = listOf("cierra", "apaga", "quita", "desactiva", "sal de", "cerra")
+        if (closeVerb.none { t.contains(it) }) return false
+        if (t.contains("cámara") || t.contains("camara")) {
+            if (_isCameraActive.value) {
+                _isCameraActive.value = false
+                MikuLog.d(TAG, "Cámara cerrada por comando de voz")
+                _statusMessage.value = "Cámara cerrada"
+            }
+            return true
+        }
+        if (t.contains("youtube")) {
+            if (_youtubeUrl.value != null) {
+                _youtubeUrl.value = null
+                MikuLog.d(TAG, "YouTube cerrado por comando de voz")
+                _statusMessage.value = "Ventana de YouTube cerrada"
+            }
+            return true
+        }
+        return false
+    }
+
+    private fun selectFirstYoutubeResult() {
+        val query = youtubeSearchQuery ?: _youtubeUrl.value?.let { url ->
+            Regex("search_query=([^&]+)").find(url)?.let { URLDecoder.decode(it.groupValues[1], "UTF-8") }
+        }
+        if (query.isNullOrBlank()) {
+            _statusMessage.value = "No hay búsqueda activa en la ventana de YouTube"
+            return
+        }
+        _statusMessage.value = "Viendo el primer resultado de \"$query\"..."
+        viewModelScope.launch(Dispatchers.IO) {
+            val embed = fetchFirstYoutubeEmbedUrl(query)
+            if (embed != null) {
+                MikuLog.d(TAG, "Primer resultado de YouTube listo: $embed")
+                _youtubeUrl.value = embed
+                _statusMessage.value = "Reproduciendo el primer resultado de \"$query\""
+            } else {
+                MikuLog.d(TAG, "No se pudo leer el primer resultado de YouTube")
+                _statusMessage.value = "No hallé el primero; toca un video en la ventana"
+            }
+        }
+    }
+
+    private fun fetchFirstYoutubeEmbedUrl(query: String): String? {
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL(
+                "https://www.youtube.com/results?search_query=${URLEncoder.encode(query, "UTF-8")}" +
+                    "&sp=EgIQAQ%3D%3D",
+            )
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 13; Moto G) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36",
+                )
+                setRequestProperty("Accept-Language", "es-PE,es;q=0.9")
+            }
+            val html = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            Regex("\"videoId\":\"([A-Za-z0-9_-]{11})\"").find(html)
+                ?.groupValues?.get(1)
+                ?.let { "https://www.youtube.com/embed/$it?autoplay=1&playsinline=1" }
+        } catch (t: Throwable) {
+            MikuLog.d(TAG, "Error buscando primer resultado de YouTube: ${t.message}")
+            null
+        } finally {
+            connection?.disconnect()
+        }
     }
 
     private val commandExecutor = AndroidCommandExecutor(
@@ -86,16 +188,23 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             MikuLog.d(TAG, "Cámara ${if (front) "FRONTAL" else "TRASERA"} solicitada${if (cameraOn) " (cambiando lente)" else " (encendiendo cámara)"}")
             _statusMessage.value = if (front) "Cámara frontal encendida" else "Cámara trasera encendida"
         },
-        onYoutubeAction = { action, url ->
+        onCameraClose = {
+            if (_isCameraActive.value) {
+                _isCameraActive.value = false
+                MikuLog.d(TAG, "Cámara cerrada por función")
+                _statusMessage.value = "Cámara cerrada"
+            }
+        },
+        onYoutubeAction = { action, payload ->
             when (action) {
-                "open" -> {
-                    _youtubeUrl.value = url
-                    MikuLog.d(TAG, "Ventana interna de YouTube: $url")
-                    _statusMessage.value = "YouTube abierto dentro de Miku"
-                }
+                "search" -> openYoutubeWindow(payload)
+                "selectFirst" -> selectFirstYoutubeResult()
                 "close" -> {
-                    _youtubeUrl.value = null
-                    _statusMessage.value = "Ventana de YouTube cerrada"
+                    if (_youtubeUrl.value != null) {
+                        _youtubeUrl.value = null
+                        MikuLog.d(TAG, "Ventana interna de YouTube cerrada")
+                        _statusMessage.value = "Ventana de YouTube cerrada"
+                    }
                 }
             }
         },
@@ -655,6 +764,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             userSpeechBuilder.append(text)
             val userText = userSpeechBuilder.toString().trim()
             _userSpeech.value = userText
+            if (handleWindowCommands(userText)) return
             if (Es_Comando_Detener_Cancion(userText) || ttsEngine.isSongPlaying) {
                 Detener_Cancion_Voz(userText)
             } else if (esSolicitudCantoUsuario(userText)) {

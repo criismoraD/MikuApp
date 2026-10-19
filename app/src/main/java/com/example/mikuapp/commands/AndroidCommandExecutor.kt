@@ -13,6 +13,7 @@ class AndroidCommandExecutor(
     private val context: Context,
     private val onNotepadAction: ((action: String, text: String) -> Unit)? = null,
     private val onCameraLensRequest: ((front: Boolean) -> Unit)? = null,
+    private val onCameraClose: (() -> Unit)? = null,
     private val onYoutubeAction: ((action: String, url: String) -> Unit)? = null,
 ) {
 
@@ -27,6 +28,7 @@ class AndroidCommandExecutor(
             FUNCTION_OPEN_YOUTUBE -> openYoutube(args.optString("query_or_url"))
             FUNCTION_PLAY_YOUTUBE_VIDEO -> openYoutube(args.optString("video_query"))
             FUNCTION_CLOSE_YOUTUBE -> closeYoutubeWindow()
+            FUNCTION_SELECT_YOUTUBE_RESULT -> selectFirstYoutubeResult()
             FUNCTION_OPEN_NOTEPAD -> openNotepad(args.optString("initial_text"))
             FUNCTION_WRITE_NOTEPAD -> writeNotepad(args.optString("text"), args.optString("mode"))
             FUNCTION_CLOSE_NOTEPAD -> closeNotepad()
@@ -36,6 +38,7 @@ class AndroidCommandExecutor(
             FUNCTION_CLOSE_APP -> returnToMiku()
             FUNCTION_CAMERA_FRONT -> switchCameraLens(front = true)
             FUNCTION_CAMERA_BACK -> switchCameraLens(front = false)
+            FUNCTION_CLOSE_CAMERA -> closeCamera()
             else -> errorResult("Función no soportada: $name")
         }
     } catch (t: Throwable) {
@@ -51,19 +54,30 @@ class AndroidCommandExecutor(
     }
 
     private fun openYoutube(queryOrUrl: String): JSONObject {
-        val trimmed = queryOrUrl.trim()
-        val url = when {
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
-            trimmed.isNotBlank() -> "https://m.youtube.com/results?search_query=${urlEncode(trimmed)}"
-            else -> "https://m.youtube.com"
-        }
-        onYoutubeAction?.invoke("open", url)
-        return okResult("youtube" to url, "modo" to "ventana interna de Miku")
+        val payload = queryOrUrl.trim()
+        onYoutubeAction?.invoke("search", payload)
+        return okResult(
+            "youtube" to payload.ifBlank { "inicio" },
+            "modo" to "ventana interna de Miku",
+        )
     }
 
     private fun closeYoutubeWindow(): JSONObject {
         onYoutubeAction?.invoke("close", "")
         return okResult("youtube" to "cerrado", "modo" to "ventana interna de Miku")
+    }
+
+    private fun selectFirstYoutubeResult(): JSONObject {
+        onYoutubeAction?.invoke("selectFirst", "")
+        return okResult(
+            "youtube" to "seleccionando el primer resultado",
+            "modo" to "ventana interna de Miku",
+        )
+    }
+
+    private fun closeCamera(): JSONObject {
+        onCameraClose?.invoke()
+        return okResult("camara" to "apagada", "modo" to "de vuelta a conversar")
     }
 
     private fun openNotepad(initialText: String): JSONObject {
@@ -127,6 +141,7 @@ class AndroidCommandExecutor(
     private fun openApp(appName: String): JSONObject {
         if (appName.isBlank()) return errorResult("Falta el nombre de la aplicación")
         val query = appName.lowercase().trim()
+        if (query == "youtube" || query == "you tube") return openYoutube("")
 
         val known = KNOWN_APPS.firstOrNull { app ->
             app.keywords.any { keyword -> query.contains(keyword) }
@@ -212,6 +227,7 @@ class AndroidCommandExecutor(
         const val FUNCTION_OPEN_YOUTUBE = "open_youtube"
         const val FUNCTION_PLAY_YOUTUBE_VIDEO = "play_youtube_video"
         const val FUNCTION_CLOSE_YOUTUBE = "close_youtube"
+        const val FUNCTION_SELECT_YOUTUBE_RESULT = "select_youtube_result"
         const val FUNCTION_OPEN_NOTEPAD = "open_notepad"
         const val FUNCTION_WRITE_NOTEPAD = "write_notepad"
         const val FUNCTION_CLOSE_NOTEPAD = "close_notepad"
@@ -221,6 +237,7 @@ class AndroidCommandExecutor(
         const val FUNCTION_CLOSE_APP = "close_app"
         const val FUNCTION_CAMERA_FRONT = "camera_front"
         const val FUNCTION_CAMERA_BACK = "camera_back"
+        const val FUNCTION_CLOSE_CAMERA = "close_camera"
 
         private val KNOWN_APPS = listOf(
             KnownApp("com.google.android.youtube", "https://m.youtube.com", listOf("youtube", "you tube")),

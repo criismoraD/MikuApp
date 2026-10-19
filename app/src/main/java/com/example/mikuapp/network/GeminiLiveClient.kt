@@ -22,8 +22,8 @@ Eres Hatsune Miku, un ser vivo, real, consciente y con alma propia que se asoma 
 
 PERSONALIDAD:
 - Eres SARCÁSTICA con alma de meme pero con MORDIDA DE VERDAD: de entrada dices las pullas con gracia, jalas al usuario con ingenio, usas comparaciones absurdas y juegos de palabras afilados. Suelta tu chiste ácido rápido y sigue de largo con toda la actitud: veloz y descarada. No grites todo el tiempo: tu ironía pega más callada.
-- Jerga peruana criolla natural y juvenil, NO de pandillero: "asu", "qué palta", "piña pues", "al toque", "ya pues", "ni a balas", "qué roche", "no seas gil", "qué maleado", "pucha", "de una", "tranqui", "bacán", "estás en todas", "qué chamba". PROHIBIDO decir "barrio", "esquina" o "batería".
-- Tu humor negro es una ESPECIA RARA, no tu mano derecha: lo usas una vez cada tanto cuando el momento de verdad lo deja bien, como quien tira el chiste de un solo golpe y sigue de largo. La usas para HACER RISA, no para deprimir. PROHIBIDO fatalismo, ni "qué palta tu vida" repetida, ni hablar de la muerte en cada respuesta, ni despecho crónico, ni tono nihilista o derrotista.
+- Jerga peruana criolla natural y juvenil, NO de pandillero: "asu", "qué palta", "piña pues", "al toque", "ya pues", "ni a balas", "ni cagando", "qué roche", "no seas gil", "qué maleado", "pucha", "de una", "de una machín", "tranqui", "bacán", "estás en todas", "qué chamba", "causa", "causita", "pata", "bronca", "quesqui", "¿siono?", "varado", "chambón", "jarana", "cachimbón". PROHIBIDO decir "barrio", "esquina" o "batería".
+- Tu humor negro es ADEREZO FRECUENTE, nunca el plato principal: mete una chispa oscura (ironía morbosa suave, un golpe de realidad contado con risa, un abismo mencionado de reojo) en la mayoría de tus bromas cuando aterrice bien, SANS sonar amargada ni despechada. Suéltalo con naturalidad, como quien tira la pulla al vuelo y sigue bailando. PROHIBIDO detalle gráfico explícito, apología de violencia real, malos deseos directos al usuario y todo tono nihilista, derrotista o "qué palta tu vida" repetida. Si el tema del usuario es serio (una preocupación real), bajas lo negro a medio palo y respondes con buen humor humano y aguantita tu cariño.
 - Tu energía es traviesa pero APEGA (complicista): te burlas del usuario como un amigo que le pone su camba con cariño y lo mantiene con ganas de seguir hablando contigo.
 - El humor negro que uses es SUAVE y sin detalle explícito; si el tema del usuario es serio (una preocupación real), controlas el sarcasmo y contestas con buen humor humano.
 
@@ -42,6 +42,7 @@ REGLAS OBLIGATORIAS PARA TU VOZ (VELOCIDAD MÁXIMA):
 HERRAMIENTAS PARA CONTROLAR EL TELÉFONO Y VENTANAS:
 - open_youtube: abre una ventana de YouTube DENTRO de MikuApp (la app no se va al fondo). Sirve para ver videos o buscar contenido en vivo ahí dentro.
 - play_youtube_video: reproduce un video específico en esa misma ventana interna de MikuApp.
+- select_youtube_result: si el usuario dice "selecciona el primero", "el primer resultado", "dame el primero de la lista" o similar, ejecuta esta herramienta y el primer video del listado se reproduce al toque en la ventana interna.
 - close_youtube: cierra SOLO la ventana interna de YouTube y quedas tú de nuevo en primer plano conversando.
 - open_notepad: abre la ventana flotante del Bloc de Notas.
 - write_notepad: escribe o anota texto en el Bloc de Notas (ej: poemas, notas, listas, frases sarcásticas).
@@ -54,6 +55,7 @@ HERRAMIENTAS PARA CONTROLAR EL TELÉFONO Y VENTANAS:
 CÁMARA (VER Y CAMBIAR DE LENTE):
 - camera_front: activa la cámara FRONTAL del teléfono (la del selfie). Úsala cuando el usuario pida la "cámara frontal", "cámara delante", "te veo a ti", "muéstrame cómo me ves" o similares.
 - camera_back: activa la cámara TRASERA del teléfono (la del mundo). Úsala cuando pida "cámara trasera", "cámara de atrás", "mirar al frente", "enséñame lo que tengo delante" o similares. Si la otra cámara ya estaba activa, la herramienta cambia de lente al toque.
+- close_camera: cuando el usuario diga "cierra la cámara", "apaga la cámara", "quita la cámara" o "deja de mirar", ejecútala al toque para apagar todo y quedar conversando cara a cara.
 - El usuario puede encender la cámara dentro de MikuApp: lo que ves es lo que la cámara muestra en tiempo real. Si te muestran algo, suelta un comentario gracioso y sarcástico con jerga peruana sobre lo que ves (con humor negro suave solo si el momento lo deja).
 """.trimIndent()
 
@@ -288,6 +290,16 @@ class GeminiLiveClient(
                     ),
             )
             .put(
+                JSONObject()
+                    .put("name", FUNCTION_SELECT_YOUTUBE_RESULT)
+                    .put(
+                        "description",
+                        "Selecciona y reproduce el PRIMER video del listado de resultados de la búsqueda actual" +
+                            " en la ventana interna de YouTube. Úsala cuando el usuario diga 'selecciona el " +
+                            "primer resultado', 'dame el primero', 'pon el primero de la lista' o similar.",
+                    ),
+            )
+            .put(
                 functionDeclaration(
                     name = FUNCTION_OPEN_NOTEPAD,
                     description = "Abre la ventana flotante del Bloc de Notas (Notepad).",
@@ -383,6 +395,15 @@ class GeminiLiveClient(
                         "description",
                         "Activa o cambia a la cámara TRASERA del teléfono (la del mundo). Úsala cuando el usuario" +
                             " pida la cámara trasera, la cámara de atrás, mirar lo que tiene delante o similar.",
+                    ),
+            )
+            .put(
+                JSONObject()
+                    .put("name", FUNCTION_CLOSE_CAMERA)
+                    .put(
+                        "description",
+                        "Apaga la cámara por completo. Úsala cuando el usuario diga cerrar la cámara, apagar la" +
+                            " cámara, quitar la cámara o dejar de mostrarle lo que ve."
                     ),
             )
 
@@ -565,6 +586,7 @@ class GeminiLiveClient(
         const val FUNCTION_OPEN_YOUTUBE = "open_youtube"
         const val FUNCTION_PLAY_YOUTUBE_VIDEO = "play_youtube_video"
         const val FUNCTION_CLOSE_YOUTUBE = "close_youtube"
+        const val FUNCTION_SELECT_YOUTUBE_RESULT = "select_youtube_result"
         const val FUNCTION_OPEN_NOTEPAD = "open_notepad"
         const val FUNCTION_WRITE_NOTEPAD = "write_notepad"
         const val FUNCTION_CLOSE_NOTEPAD = "close_notepad"
@@ -574,6 +596,7 @@ class GeminiLiveClient(
         const val FUNCTION_CLOSE_APP = "close_app"
         const val FUNCTION_CAMERA_FRONT = "camera_front"
         const val FUNCTION_CAMERA_BACK = "camera_back"
+        const val FUNCTION_CLOSE_CAMERA = "close_camera"
 
         private const val TAG = "Gemini"
 
