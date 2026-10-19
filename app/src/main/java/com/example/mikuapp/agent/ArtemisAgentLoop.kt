@@ -33,8 +33,9 @@ import java.util.ArrayDeque
 /**
  * Bucle reactivo Observe → Think → Act de MikuApp.
  *
- * Vive fuera de la Activity para seguir funcionando mientras el agente abre
- * otras aplicaciones. El servicio de accesibilidad es el único ejecutor.
+ * "Think" se ejecuta en una sesión Gemini Live dedicada (Gemini 3.8 Live):
+ * se envía la observación por clientContent (texto + captura) y se espera el
+ * siguiente toolCall. No se usa ningún modelo de texto.
  */
 object ArtemisAgentLoop {
 
@@ -43,6 +44,7 @@ object ArtemisAgentLoop {
     private const val STABILIZE_MS = 1_500L
     private const val MAX_CALLS_PER_TURN = 4
     private const val MAX_HISTORY = 8
+    private const val DECISION_TIMEOUT_MS = 90_000L
     private const val NOTIFICATION_ID = 4546
     private const val CHANNEL_ID = "miku_artemis"
     private const val API_KEY_PLACEHOLDER = "your_api_key_here"
@@ -90,12 +92,12 @@ object ArtemisAgentLoop {
             return false
         }
 
-        MikuLog.d(TAG, "Iniciando tarea ARTEMIS: $cleanGoal")
+        MikuLog.d(TAG, "Iniciando tarea ARTEMIS con Gemini 3.8 Live: $cleanGoal")
         _state.value = AgentState(
             running = true,
             goal = cleanGoal,
             maxSteps = MAX_STEPS,
-            lastAction = "Observando la pantalla",
+            lastAction = "Conectando con Gemini 3.8 Live...",
         )
         postNotification(service, cleanGoal)
         job = scope.launch {
@@ -131,11 +133,14 @@ object ArtemisAgentLoop {
         apiKey: String,
         onFinished: ((Boolean, String) -> Unit)?,
     ) {
-        val client = GeminiAgentClient(apiKey)
+        val client = GeminiLiveAgentClient(apiKey)
         val executor = service.actionExecutor
         val history = ArrayDeque<String>()
 
         try {
+            client.awaitConnect()
+            currentCoroutineContext().ensureActive()
+
             val initialSnapshot = service.snapshot()
             if (initialSnapshot == null) {
                 finish(
@@ -145,31 +150,33 @@ object ArtemisAgentLoop {
                 )
                 return
             }
+
             var snapshot: ScreenSnapshot = initialSnapshot
-
             var previousFingerprint: Int? = null
+            var step = 0
             var textOnlyTurns = 0
+            var screenshot = service.captureScreenshotBase64()
 
-            for (step in 1..MAX_STEPS) {
+            var observation = buildObservation(
+                goal = goal,
+                step = step + 1,
+                snapshot = snapshot,
+                history = history,
+                screenUnchanged = false,
+                hasScreenshot = screenshot != null,
+            )
+            client.sendObservation(observation, screenshot)
+
+            while (step < MAX_STEPS) {
                 currentCoroutineContext().ensureActive()
 
-                val screenshot = service.captureScreenshotBase64()
-                val observation = buildObservation(
-                    goal = goal,
-                    step = step,
-                    snapshot = snapshot,
-                    history = history,
-                    screenUnchanged = previousFingerprint == snapshot.fingerprint(),
-                    hasScreenshot = screenshot != null,
-                )
-                client.addUserObservation(observation, screenshot)
-                client.pruneScreenshots(keepLast = 3)
+                val decision = client.awaitDecision(DECISION_TIMEOUT_MS)
+                step++
+                val calls = decision.calls
 
-                val turn = client.generate()
-
-                if (turn.calls.isEmpty()) {
+                if (calls.isEmpty()) {
                     textOnlyTurns++
-                    val text = turn.text.orEmpty()
+                    val text = decision.text.orEmpty()
                     if (text.isNotBlank() && textOnlyTurns >= 2) {
                         finish(
                             success = true,
@@ -178,16 +185,33 @@ object ArtemisAgentLoop {
                         )
                         return
                     }
-                    client.addUserText(
-                        "No has llamado a ninguna herramienta. Usa una herramienta para avanzar " +
-                            "o llama a complete_task cuando termines.",
-                    )
+
+                    _state.update {
+                        it.copy(
+                            step = step,
+                            lastAction = "Esperando una herramienta",
+                            lastResult = text.take(180),
+                        )
+                    }
+
+                    if (step < MAX_STEPS) {
+                        val nudge = buildObservation(
+                            goal = goal,
+                            step = step + 1,
+                            snapshot = snapshot,
+                            history = history,
+                            screenUnchanged = false,
+                            hasScreenshot = screenshot != null,
+                        ) + "\nATENCIÓN: no llamaste a ninguna herramienta. " +
+                            "Usa una herramienta para avanzar o llama a complete_task."
+                        client.sendObservation(nudge, screenshot)
+                    }
                     continue
                 }
 
                 textOnlyTurns = 0
 
-                val completion = turn.calls.firstOrNull { it.name == "complete_task" }
+                val completion = calls.firstOrNull { it.name == "complete_task" }
                 if (completion != null) {
                     val success = completion.args.optBoolean("success", true)
                     val message = completion.args.optString("final_response_to_user")
@@ -199,9 +223,9 @@ object ArtemisAgentLoop {
                 }
 
                 previousFingerprint = snapshot.fingerprint()
-                val results = mutableListOf<Pair<String, JSONObject>>()
+                val results = mutableListOf<Pair<GeminiLiveAgentClient.ToolCall, ActionResult>>()
 
-                for (call in turn.calls.take(MAX_CALLS_PER_TURN)) {
+                for (call in calls.take(MAX_CALLS_PER_TURN)) {
                     currentCoroutineContext().ensureActive()
 
                     val reason = call.args.optString("reason").trim()
@@ -216,7 +240,7 @@ object ArtemisAgentLoop {
                     }
 
                     val result = executeTool(executor, call)
-                    results += call.name to result.toResponse()
+                    results += call to result
 
                     history.addLast(
                         "$step. ${call.name}(${call.args}) → " +
@@ -228,8 +252,22 @@ object ArtemisAgentLoop {
                     delay(STABILIZE_MS)
                 }
 
-                client.addToolResults(results)
-                snapshot = service.snapshot() ?: snapshot
+                client.sendToolResponses(results)
+
+                if (step < MAX_STEPS) {
+                    snapshot = service.snapshot() ?: snapshot
+                    screenshot = service.captureScreenshotBase64()
+                    val unchanged = previousFingerprint == snapshot.fingerprint()
+                    observation = buildObservation(
+                        goal = goal,
+                        step = step + 1,
+                        snapshot = snapshot,
+                        history = history,
+                        screenUnchanged = unchanged,
+                        hasScreenshot = screenshot != null,
+                    )
+                    client.sendObservation(observation, screenshot)
+                }
             }
 
             finish(
@@ -240,20 +278,21 @@ object ArtemisAgentLoop {
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (t: Throwable) {
-            MikuLog.d(TAG, "Error en el bucle: ${t.message}")
+            MikuLog.d(TAG, "Error en el bucle Live: ${t.message}")
             finish(
                 success = false,
                 message = "No pude completar la tarea: ${t.message ?: t.javaClass.simpleName}",
                 onFinished = onFinished,
             )
         } finally {
+            client.close()
             cancelNotification()
         }
     }
 
     private suspend fun executeTool(
         executor: ActionExecutor,
-        call: GeminiAgentClient.ToolCall,
+        call: GeminiLiveAgentClient.ToolCall,
     ): ActionResult {
         val args = call.args
         return when (call.name) {

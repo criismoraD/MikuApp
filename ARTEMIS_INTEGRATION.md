@@ -17,10 +17,10 @@ través de un `AccessibilityService`. No necesita PC, cables ni ADB.
                     │               │                │
               OBSERVAR          PENSAR            ACTUAR
                     │               │                │
-     MikuAccessibilityService   GeminiAgentClient   ActionExecutor
-     · snapshot() árbol UI      · generateContent   · click / typeText
-     · captura JPEG Base64      · Function Calling  · swipe / globalAction
-     · índice [1..N]            · historial         · openApp (PackageManager)
+     MikuAccessibilityService   GeminiLiveAgentClient  ActionExecutor
+     · snapshot() árbol UI      · WebSocket Live 3.8   · click / typeText
+     · captura JPEG Base64      · clientContent        · swipe / globalAction
+     · índice [1..N]            · toolCall             · openApp (PackageManager)
 ```
 
 Por cada paso:
@@ -30,9 +30,12 @@ Por cada paso:
    con clase, texto, `contentDescription`, `viewIdResourceName` y centro
    `(centerX, centerY)` de `getBoundsInScreen()`. Se adjunta una captura JPEG
    en Base64 (API 30+) como respaldo visual.
-2. **Pensar** — `GeminiAgentClient` envía la tarea original, el historial de
-   las últimas 8 acciones y el estado actual (nodos + imagen) a
-   `generateContent` con *function calling*.
+2. **Pensar** — `GeminiLiveAgentClient` abre una sesión Live dedicada con
+   **Gemini 3.8 Live** (`bidiGenerateContent`) y envía la tarea original, el
+   historial de las últimas 8 acciones y el estado actual (nodos + imagen) por
+   `clientContent`. El modelo responde con `toolCall`. Este modelo es de audio
+   nativo y no soporta `responseModalities=TEXT`, así que la sesión pide AUDIO
+   y descarta el audio: solo se consumen las herramientas.
 3. **Actuar** — `ActionExecutor` ejecuta la herramienta devuelta.
 4. **Estabilizar** — 1,5 s de espera tras cada acción antes de volver a
    observar. Límite estricto de **15 pasos** por tarea.
@@ -46,7 +49,8 @@ Por cada paso:
 | `app/src/main/res/xml/miku_accessibility_service_config.xml` | Configuración del servicio (`canRetrieveWindowContent`, `canPerformGestures`, `canTakeScreenshot`, `flagReportViewIds`). |
 | `agent/MikuAccessibilityService.kt` | Extracción del árbol UI indexado, mapa índice → nodo y captura JPEG/Base64. |
 | `agent/ActionExecutor.kt` | Motor de acciones: clic semántico con *fallback* a coordenadas, texto (`ACTION_SET_TEXT` + portapapeles), gestos, botones globales y `openApp`. |
-| `agent/GeminiAgentClient.kt` | Cliente REST de Gemini con las 7 herramientas y el System Prompt ARTEMIS. |
+| `agent/GeminiLiveAgentClient.kt` | Sesión Live dedicada con **Gemini 3.8 Live** (`bidiGenerateContent`), observaciones por `clientContent` y `toolCall`/`toolResponse`. |
+| `agent/AgentToolSchema.kt` | Las 7 herramientas de function calling y el System Prompt ARTEMIS. |
 | `agent/ArtemisAgentLoop.kt` | Bucle Observe-Think-Act, límite de pasos, notificación con parada de emergencia. |
 | `agent/AgentStopReceiver.kt` | Parada de emergencia desde la notificación. |
 | `agent/MikuAgentJsBridge.kt` | Puente opcional para UI Web/React/Capacitor embebida. |
@@ -144,11 +148,13 @@ window.MikuAgent.openAccessibilitySettings()
 - La clave se lee de `.env` (`GEMINI_API_KEY=…`), que está en `.gitignore`.
   Se incrusta en `BuildConfig`, por lo que **no debe publicarse la APK** con tu
   clave; para distribución usa un proxy propio.
-- Modelo del bucle: `gemini-3.8-flash` (constante `GeminiAgentClient.DEFAULT_MODEL`).
-  Si el modelo principal responde 503/429 por alta demanda, el cliente
-  reintenta automáticamente con `gemini-3-flash-preview`. La conversación de voz
-  de Miku sigue usando `gemini-3.8-live`, que solo funciona por WebSocket
-  (`bidiGenerateContent`) y no por `generateContent`.
+- Modelo del agente: **Gemini 3.8 Live** (`models/gemini-3.8-live`) mediante
+  una sesión Live dedicada. No se usa ningún modelo de texto. La sesión de voz
+  de Miku usa el mismo modelo en su propia conexión WebSocket.
+  `gemini-3.8-live` es audio nativo: rechaza `responseModalities=TEXT`, por eso
+  el agente pide AUDIO y descarta los fragmentos de audio.
+- Si en el futuro se añade un fallback de texto, el único modelo permitido es
+  `gemini-3.5-flash-lite` (`models/gemini-3.5-flash-lite`).
 - Todo el control ocurre en el dispositivo; el árbol UI y las capturas se
   envían a la API de Gemini como contexto para la decisión.
 
