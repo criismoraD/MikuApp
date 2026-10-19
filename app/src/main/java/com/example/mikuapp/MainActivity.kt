@@ -6,8 +6,11 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Bundle
 import android.util.Size
+import java.io.ByteArrayOutputStream
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -375,6 +378,7 @@ fun MikuScreen(viewModel: MikuViewModel = viewModel()) {
             MikuYouTubeOverlay(
                 url = url,
                 onClose = viewModel::closeYoutubeWindow,
+                onScreenFrame = viewModel::sendScreenFrame,
             )
         }
     }
@@ -1190,6 +1194,7 @@ private fun MikuNotepadOverlay(
 private fun MikuYouTubeOverlay(
     url: String,
     onClose: () -> Unit,
+    onScreenFrame: (ByteArray) -> Unit = {},
 ) {
     val context = LocalContext.current
     val webView = remember(url) {
@@ -1207,6 +1212,25 @@ private fun MikuYouTubeOverlay(
 
     DisposableEffect(webView) {
         onDispose { webView.destroy() }
+    }
+
+    // Compartir la pantalla con Gemini: capturar el WebView como frames de video
+    LaunchedEffect(webView) {
+        while (true) {
+            delay(1_500)
+            try {
+                if (webView.width > 0 && webView.height > 0) {
+                    val bitmap = Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bitmap)
+                    webView.draw(canvas)
+                    val stream = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 60, stream)
+                    bitmap.recycle()
+                    onScreenFrame(stream.toByteArray())
+                }
+            } catch (_: Exception) {
+            }
+        }
     }
 
     val windowLabel = when {

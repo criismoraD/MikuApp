@@ -86,12 +86,18 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     private fun handleWindowCommands(userText: String): Boolean {
         val t = userText.lowercase()
 
-        // "selecciona el primer resultado" / "dame el primero de la lista"
-        val firstResult = Regex(
-            "\\b(selecciona|seleccione|elige|dame|abre|pon(?:me)?|reproduce(?:me)?|busca)\\b[^.!?]{0,24}\\bprimer[oa]?\\b",
-            RegexOption.IGNORE_CASE,
+        // "selecciona el primero" / "entra al primer resultado" / "dale al primero"
+        val verbs = listOf(
+            "selecciona", "seleccione", "seleccionar", "elige", "escoge",
+            "dame", "abre", "entra", "dale", "pon", "ponme", "reproduce",
+            "reproduceme", "prueba", "ponte", "quisiera", "quiero", "busca",
+            "búscame", "buscame", "vamos",
         )
-        if (_youtubeUrl.value != null && firstResult.containsMatchIn(t)) {
+        val firstWord = listOf("primer", "primero", "primera")
+        if (_youtubeUrl.value != null &&
+            firstWord.any { t.contains(it) } &&
+            verbs.any { t.contains(it) }
+        ) {
             selectFirstYoutubeResult()
             return true
         }
@@ -288,6 +294,8 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     private var expressionTimerJob: Job? = null
 
     private var lastCameraFrameAt = 0L
+    @Volatile
+    private var lastScreenFrameAt = 0L
     @Volatile
     private var lastModelActivityAt = 0L
     @Volatile
@@ -630,6 +638,16 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
         client.sendVideoFrame(jpeg)
     }
 
+    fun sendScreenFrame(jpeg: ByteArray) {
+        if (_youtubeUrl.value == null) return
+        val client = geminiClient ?: return
+        if (!client.isConnected) return
+        val now = System.currentTimeMillis()
+        if (now - lastScreenFrameAt < CAMERA_FRAME_MIN_INTERVAL_MS) return
+        lastScreenFrameAt = now
+        client.sendVideoFrame(jpeg)
+    }
+
     fun testVoice() {
         MikuLog.d(TAG, "Prueba de voz de Miku solicitada")
         ttsEngine.testVoice()
@@ -793,7 +811,6 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
 
         override fun onInputTranscription(text: String) {
             lastUserSpeechAt = System.currentTimeMillis()
-            if ((isSpeaking.value && !ttsEngine.isSongPlaying) || modelTurnInProgress) return
             if (!userTurnActive) {
                 userSpeechBuilder.setLength(0)
                 gataSongRequestedInTurn = false
@@ -802,7 +819,10 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
             userSpeechBuilder.append(text)
             val userText = userSpeechBuilder.toString().trim()
             _userSpeech.value = userText
+            // Comandos de ventana: SIEMPRE se procesan, incluso durante turnos del modelo
             if (handleWindowCommands(userText)) return
+            // Conversación normal solo si Miku no está hablando y el modelo no genera
+            if ((isSpeaking.value && !ttsEngine.isSongPlaying) || modelTurnInProgress) return
             if (Es_Comando_Detener_Cancion(userText) || ttsEngine.isSongPlaying) {
                 Detener_Cancion_Voz(userText)
             } else if (esSolicitudCantoUsuario(userText)) {
