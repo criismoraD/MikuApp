@@ -187,6 +187,15 @@ class MikuTtsEngine(
             )
             MikuLog.d(TAG, "Cargando modelo VITS (${modelFile.length() / 1024 / 1024} MB, hilos=$threads)")
             tts = OfflineTts(assetManager = null, config = OfflineTtsConfig(model = modelConfig))
+            // Warmup: una inferencia mínima para precachear el grafo ONNX,
+            // así la primera frase real no paga el costo de compilación del primer inference.
+            runCatching {
+                val wuStart = System.currentTimeMillis()
+                tts?.generate(text = "hola", sid = SPEAKER_ID, speed = GENERATION_SPEED)
+                MikuLog.d(TAG, "Warmup TTS completado en ${System.currentTimeMillis() - wuStart} ms")
+            }.onFailure {
+                MikuLog.d(TAG, "Warmup TTS falló (no crítico): ${it.message}")
+            }
             _isReady.value = true
             _error.value = null
             val engine = tts

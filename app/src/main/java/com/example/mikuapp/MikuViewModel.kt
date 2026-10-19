@@ -353,6 +353,7 @@ class MikuViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     init {
+        initializeTts()
         updateVoiceRouting()
         sentenceBuffer.onSentence = { sentence -> handleMikuSentence(sentence) }
         viewModelScope.launch {
