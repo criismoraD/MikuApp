@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuración del Servicio de Accesibilidad de MikuApp.
+
+  - canRetrieveWindowContent: árbol UI (AccessibilityNodeInfo).
+  - canPerformGestures: taps, swipes y gestos por coordenadas.
+  - canTakeScreenshot: captura visual para el fallback de Gemini (API 30+).
+  - flagReportViewIds: expone viewIdResourceName, útil para identificar campos.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewLongClicked|typeViewFocused|typeViewTextChanged|typeViewScrolled"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="true"
+    android:notificationTimeout="100" />
